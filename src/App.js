@@ -37,13 +37,18 @@ export default function App() {
   useEffect(() => {
     if (HERO_CSV_URL.includes('http')) {
       fetch(HERO_CSV_URL).then(res => res.text()).then(text => {
-        const formattedData = parseCSV(text).map(obj => ({
-          id: obj.hero_id,
-          name: obj.hero_name,
-          role: obj.primary_roles ? obj.primary_roles.split(',')[0] : '其他',
-          counters: obj.counters ? obj.counters.split(',').map(c => c.trim()) : [],
-          trap: obj.is_trap?.toLowerCase() === 'true'
-        }));
+        const formattedData = parseCSV(text).map(obj => {
+          // 支援多路線解析，將 primary_roles 切割成陣列
+          const rolesArr = obj.primary_roles ? obj.primary_roles.split(',').map(r => r.trim()) : ['其他'];
+          return {
+            id: obj.hero_id,
+            name: obj.hero_name,
+            role: rolesArr[0], // UI 顯示預設拿第一順位路線
+            roles: rolesArr,   // 邏輯運算用，包含所有錯位可能
+            counters: obj.counters ? obj.counters.split(',').map(c => c.trim()) : [],
+            trap: obj.is_trap?.toLowerCase() === 'true'
+          };
+        });
         setHERO_DB(formattedData);
       }).catch(err => console.error(err));
     }
@@ -169,10 +174,22 @@ export default function App() {
               .map(h => {
                 let score = 0; let reasons = [];
                 
-                // 過濾陷阱
-                if (h.trap) { score -= 2000; }
+                // 取得當前操作隊伍已經確定的「主要分路」集合
+                const currentTeamPicks = draftOrder[currentTurn] === 0 ? ourPicks : enemyPicks;
+                const filledRoles = currentTeamPicks.map(p => p.roles[0]);
                 
-                // 優先級一：我方陣容體系 (大幅提高權重)
+                // 規則 A: 過濾陷阱
+                if (h.trap) { score -= 2000; }
+
+                // 規則 B: 分路衝突檢測 (Role Conflict)
+                // 如果這隻英雄能走的路，全部都已經被現有陣容的主要分路佔滿了，重罰降級
+                const isRoleConflict = h.roles.every(r => filledRoles.includes(r));
+                if (isRoleConflict && currentTeamPicks.length > 0) {
+                    score -= 1000;
+                    reasons.push('路線重疊');
+                }
+                
+                // 規則 C: 我方陣容體系優先
                 if (draftOrder[currentTurn] === 0 && selectedComp) {
                    if (h.id === selectedComp.core_hero_id) { 
                        score += 1000; 
@@ -184,7 +201,7 @@ export default function App() {
                    }
                 }
 
-                // 優先級二：反制敵方 (權重低於陣容連動，作為輔助決策)
+                // 規則 D: 反制敵方
                 enemyPicks.forEach(e => { 
                   if (h.counters && h.counters.includes(e.id)) { 
                       score += 100; 
@@ -196,8 +213,9 @@ export default function App() {
               }).sort((a, b) => b.score - a.score)
               .map(h => (
                 <button key={h.id} onClick={() => handlePick(h)} className={`p-3 rounded-xl text-left shadow transition-all duration-150 active:scale-95 border ${
-                  h.score >= 500 ? 'bg-blue-950/70 border-blue-500 text-blue-200' : // 陣容連動與核心以藍色顯示
-                  h.score > 0 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : // 純 Counter 以橘色顯示
+                  h.score >= 500 ? 'bg-blue-950/70 border-blue-500 text-blue-200' : 
+                  h.score > 0 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : 
+                  h.score < 0 ? 'bg-slate-900/40 border-slate-800/40 text-slate-600 opacity-50 grayscale' : // 扣分的直接變灰變暗
                   'bg-slate-800/80 border-slate-700/60'
                 }`}>
                   <div className="flex justify-between items-center mb-1">
@@ -206,7 +224,9 @@ export default function App() {
                   </div>
                   <div className="min-h-[18px] flex flex-wrap gap-1">
                     {h.reasons.length > 0 ? h.reasons.map((r, idx) => <span key={idx} className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${
-                      r.includes('連動') || r.includes('核心') ? 'bg-blue-900/40 text-blue-300 border-blue-500/30' : 'bg-black/40 text-yellow-400 border-yellow-500/20'
+                      r.includes('路線重疊') ? 'bg-red-900/30 text-red-500 border-red-900/50' :
+                      r.includes('連動') || r.includes('核心') ? 'bg-blue-900/40 text-blue-300 border-blue-500/30' : 
+                      'bg-black/40 text-yellow-400 border-yellow-500/20'
                     }`}>{r}</span>) : <span className="text-[9px] text-slate-500 italic">無特定戰術理由</span>}
                   </div>
                 </button>
