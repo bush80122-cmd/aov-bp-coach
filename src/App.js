@@ -119,4 +119,128 @@ export default function App() {
         <div>
           <h2 className="text-center mb-6 font-bold text-xl text-yellow-400 tracking-wide">選擇本局核心戰術體系</h2>
           <div className="space-y-3">
-            {
+            {TACTICS_DB.map(comp => (
+              <button key={comp.comp_id} onClick={() => { setSelectedComp(comp); setPhase('draft'); }} className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-blue-500 text-left transition-all active:scale-98">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-lg">{comp.comp_name}</span>
+                  {comp.win_rate && <span className="text-sm font-mono bg-slate-900 text-green-400 px-2 py-1 rounded border border-slate-600">勝率 {comp.win_rate}</span>}
+                </div>
+              </button>
+            ))}
+            {TACTICS_DB.length === 0 && (
+              <div className="text-center text-slate-400 bg-slate-800/50 p-6 rounded-xl border border-dashed border-slate-700">
+                <p className="text-sm mb-2">💡 尚未偵測到雲端戰術資料</p>
+                <button onClick={() => { setSelectedComp(null); setPhase('draft'); }} className="mt-4 bg-slate-700 text-xs px-4 py-2 rounded-lg font-bold">不選陣容，直接進入一般 BP</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {phase === 'draft' && currentTurn < 10 && (
+        <div className="flex flex-col h-[calc(100vh-2rem)]">
+          <div className="flex justify-between items-center mb-3 bg-slate-800/40 p-2 rounded-lg border border-slate-800 text-xs text-slate-400 shrink-0">
+             <div>核心體系: <span className="text-yellow-400 font-bold">{selectedComp ? selectedComp.comp_name : "未指定"}</span></div>
+             <div>進度: <span className="text-white font-mono">{currentTurn + 1}</span> / 10 手</div>
+          </div>
+          
+          <h2 className={`text-center mb-3 font-bold text-lg tracking-wide px-4 py-2 rounded-xl bg-slate-950/40 border shrink-0 ${draftOrder[currentTurn] === 0 ? "text-blue-400 border-blue-500/20" : "text-red-400 border-red-500/20"}`}>
+            {draftOrder[currentTurn] === 0 ? "🔵 輪到我方選擇" : "🔴 輪到敵方選擇"}
+          </h2>
+
+          <div className="flex gap-2 mb-4 shrink-0 items-start">
+            {/* 我方陣容面版 */}
+            <div className="flex-1 bg-blue-950/30 border border-blue-500/20 rounded-lg p-2 min-h-[60px]">
+              <h3 className="text-[11px] font-bold text-blue-400 mb-1.5 border-b border-blue-500/20 pb-1 flex justify-between">
+                <span>我方陣容</span><span>{ourPicks.length}/5</span>
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {ourPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
+                  ourPicks.map(p => <span key={p.id} className="text-[11px] bg-blue-900/60 text-blue-100 px-1.5 py-0.5 rounded border border-blue-700/50">{p.name}</span>)
+                }
+              </div>
+            </div>
+            
+            {/* 敵方陣容與預測面版 */}
+            <div className="flex-1 bg-red-950/20 border border-red-500/10 rounded-lg p-2 min-h-[60px]">
+              <h3 className="text-[11px] font-bold text-red-400 mb-1.5 border-b border-red-500/10 pb-1 flex justify-between">
+                <span>敵方陣容</span><span>{enemyPicks.length}/5</span>
+              </h3>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {enemyPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
+                  enemyPicks.map(p => <span key={p.id} className="text-[11px] bg-red-900/50 text-red-100 px-1.5 py-0.5 rounded border border-red-800/50">{p.name}</span>)
+                }
+              </div>
+              
+              {/* 預測敵方體系區塊 */}
+              {predictedEnemyComps.length > 0 && (
+                <div className="pt-2 border-t border-red-900/50">
+                  <div className="text-[10px] text-red-400/80 mb-1 font-bold">⚠️ 敵方體系預測：</div>
+                  {predictedEnemyComps.map((pComp, idx) => (
+                    <div key={idx} className="text-[10px] bg-black/40 text-red-200 px-1.5 py-1 rounded border border-red-900/50 mb-1">
+                      <span className="font-bold text-red-300">{pComp.comp_name}</span>
+                      <div className="text-[9px] text-slate-400 mt-0.5">[{pComp.matchReasons.join(' + ')}]</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 overflow-y-auto pr-1 flex-1 pb-4">
+            {HERO_DB
+              .filter(h => !ourPicks.find(p => p.id === h.id) && !enemyPicks.find(e => e.id === h.id))
+              .map(h => {
+                let score = 0; 
+                let reasons = [];
+                if (h.trap) { score -= 2000; }
+                enemyPicks.forEach(e => { 
+                  if (h.counters && h.counters.includes(e.id)) { score += 150; reasons.push(`完剋: ${e.name}`); } 
+                });
+                if (draftOrder[currentTurn] === 0 && selectedComp) {
+                   if (h.id === selectedComp.core_hero_id) { score += 300; reasons.push('核心必選'); } 
+                   else if (selectedComp.synergy_hero_ids.includes(h.id)) { score += 100; reasons.push('陣容連動'); }
+                }
+                return { ...h, score, reasons };
+              })
+              .sort((a, b) => b.score - a.score)
+              .map(h => (
+                <button key={h.id} onClick={() => handlePick(h)} className={`p-3 rounded-xl text-left shadow transition-all duration-150 active:scale-95 border ${h.score >= 300 ? 'bg-blue-950/70 border-blue-500 text-blue-200' : h.score > 0 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : 'bg-slate-800/80 border-slate-700/60'}`}>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="font-bold text-base">{h.name}</span>
+                    <span className="text-[10px] opacity-40 bg-black/30 px-1.5 py-0.5 rounded">{h.role}</span>
+                  </div>
+                  <div className="min-h-[18px] flex flex-wrap gap-1">
+                    {h.reasons.length > 0 ? h.reasons.map((r, idx) => <span key={idx} className="text-[9px] font-medium bg-black/40 px-1.5 py-0.5 rounded text-yellow-400 border border-yellow-500/20">{r}</span>) : <span className="text-[9px] text-slate-500 italic">無特定戰術理由</span>}
+                  </div>
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {phase === 'analysis' && (
+        <div className="text-center pt-6">
+          <h2 className="text-2xl font-bold text-green-400 mb-6 tracking-wide">⚔️ BP 推演完成 ⚔️</h2>
+          <div className="flex justify-between gap-3 mb-8">
+            <div className="bg-blue-950/30 border border-blue-500/20 p-4 rounded-xl w-1/2 shadow-inner">
+              <h3 className="font-bold text-blue-400 border-b border-blue-500/20 pb-2 mb-3 text-base">我方陣容</h3>
+              <div className="space-y-2">
+                {ourPicks.map((p, i) => <div key={i} className="flex justify-between text-sm bg-slate-900/50 p-2 rounded border border-slate-800"><span className="font-bold">{p.name}</span><span className="text-[10px] text-slate-500">{p.role}</span></div>)}
+              </div>
+            </div>
+            <div className="bg-red-950/20 border border-red-500/10 p-4 rounded-xl w-1/2 shadow-inner">
+              <h3 className="font-bold text-red-400 border-b border-red-500/10 pb-2 mb-3 text-base">敵方陣容</h3>
+              <div className="space-y-2">
+                {enemyPicks.map((p, i) => <div key={i} className="flex justify-between text-sm bg-slate-900/50 p-2 rounded border border-slate-800"><span className="font-bold">{p.name}</span><span className="text-[10px] text-slate-500">{p.role}</span></div>)}
+              </div>
+            </div>
+          </div>
+          <button onClick={() => window.location.reload()} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">
+            <RefreshCw size={20} /> 準備下一局推演
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
