@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, AlertTriangle, ShieldAlert, BookOpen, Undo } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ShieldAlert, BookOpen } from 'lucide-react';
 
 // === 英雄表與戰術陣容表 CSV 連結 ===
 const HERO_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?output=csv";
@@ -67,6 +67,7 @@ export default function App() {
           advantage_vs: obj.advantage_vs ? obj.advantage_vs.split(',').map(c => c.trim()) : [], 
           disadvantage_vs: obj.disadvantage_vs ? obj.disadvantage_vs.split(',').map(c => c.trim()) : [], 
           win_rate: obj.win_rate || obj['勝率'] || "",
+          // 更新：對齊表單新的欄位名稱
           advantage_comp: obj.advantage_comp || "",
           disadvantage_comp: obj.disadvantage_comp || "",
           priority_lane: obj.priority_lane || "",
@@ -129,19 +130,6 @@ export default function App() {
          setPhase('adjust_comp');
          return;
       }
-    }
-  };
-
-  // 新增：復原上一手選角的邏輯
-  const handleUndoPick = () => {
-    if (currentTurn === 0) return;
-    const lastTurn = currentTurn - 1;
-    const wasOurTurn = draftOrder[lastTurn] === 0;
-
-    if (wasOurTurn) {
-      setOurPicks(prev => prev.slice(0, -1));
-    } else {
-      setEnemyPicks(prev => prev.slice(0, -1));
     }
   };
 
@@ -297,19 +285,9 @@ export default function App() {
             </div>
           )}
 
-          {/* 加入了復原按鈕的狀態列 */}
           <div className="flex justify-between items-center mb-3 bg-slate-800/40 p-2 rounded-lg border border-slate-800 text-xs text-slate-400 shrink-0">
-             <div className="flex items-center gap-2">
-               <span>核心體系: <span className="text-yellow-400 font-bold">{selectedComp ? selectedComp.comp_name : "尚未指定"}</span></span>
-             </div>
-             <div className="flex items-center gap-3">
-               {currentTurn > 0 && (
-                 <button onClick={handleUndoPick} className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded border border-slate-600 active:scale-95 transition-all">
-                   <Undo size={12} /> 復原
-                 </button>
-               )}
-               <span>進度: <span className="text-white font-mono">{currentTurn + 1}</span> / 10 手</span>
-             </div>
+             <div>核心體系: <span className="text-yellow-400 font-bold">{selectedComp ? selectedComp.comp_name : "尚未指定"}</span></div>
+             <div>進度: <span className="text-white font-mono">{currentTurn + 1}</span> / 10 手</div>
           </div>
           
           <h2 className={`text-center mb-3 font-bold text-lg tracking-wide px-4 py-2 rounded-xl bg-slate-950/40 border shrink-0 ${draftOrder[currentTurn] === 0 ? "text-blue-400 border-blue-500/20" : "text-red-400 border-red-500/20"}`}>
