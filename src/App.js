@@ -58,40 +58,28 @@ export default function App() {
           comp_name: obj.comp_name,
           core_hero_id: obj.core_hero_id,
           synergy_hero_ids: obj.synergy_hero_ids ? obj.synergy_hero_ids.split(',').map(c => c.trim()) : [],
-          win_rate: obj.win_rate || obj['勝率'] || "" 
+          win_rate: obj.win_rate || obj['勝率'] || "",
+          // 抓取優缺點欄位
+          advantage: obj.advantage || obj['優點'] || "",
+          disadvantage: obj.disadvantage || obj['缺點'] || ""
         }));
         setTACTICS_DB(formattedTactics);
       }).catch(err => console.error(err));
     }
   }, []);
 
-  // === 敵方陣容預測特徵比對邏輯 ===
+  // 敵方陣容預測邏輯
   const predictedEnemyComps = useMemo(() => {
     if (enemyPicks.length === 0 || TACTICS_DB.length === 0) return [];
-    
     return TACTICS_DB.map(comp => {
       let matchScore = 0;
       let matchReasons = [];
-      
-      // 1. 檢查核心是否出現
       const hasCore = enemyPicks.find(e => e.id === comp.core_hero_id);
-      if (hasCore) {
-        matchScore += 50;
-        matchReasons.push(`核心:${hasCore.name}`);
-      }
-      
-      // 2. 檢查連動特徵是否出現
+      if (hasCore) { matchScore += 50; matchReasons.push(`核心:${hasCore.name}`); }
       const pickedSynergies = enemyPicks.filter(e => comp.synergy_hero_ids.includes(e.id));
-      if (pickedSynergies.length > 0) {
-        matchScore += (pickedSynergies.length * 20);
-        matchReasons.push(`連動:${pickedSynergies.map(p => p.name).join(',')}`);
-      }
-      
+      if (pickedSynergies.length > 0) { matchScore += (pickedSynergies.length * 20); matchReasons.push(`連動:${pickedSynergies.map(p => p.name).join(',')}`); }
       return { ...comp, matchScore, matchReasons };
-    })
-    .filter(comp => comp.matchScore > 0)
-    .sort((a, b) => b.matchScore - a.matchScore)
-    .slice(0, 2); // 擷取可能性最高的前兩名
+    }).filter(comp => comp.matchScore > 0).sort((a, b) => b.matchScore - a.matchScore);
   }, [enemyPicks, TACTICS_DB]);
 
   const handlePick = (hero) => {
@@ -99,6 +87,9 @@ export default function App() {
     else setEnemyPicks([...enemyPicks, hero]);
     if (currentTurn + 1 === 10) setPhase('analysis');
   };
+
+  // 結算畫面用的敵方最終預測陣容 (取最高分第一名)
+  const finalEnemyComp = predictedEnemyComps.length > 0 ? predictedEnemyComps[0] : null;
 
   return (
     <div className="min-h-screen bg-slate-900 text-white font-sans p-4 max-w-md mx-auto selection:bg-blue-500/30 flex flex-col">
@@ -127,12 +118,6 @@ export default function App() {
                 </div>
               </button>
             ))}
-            {TACTICS_DB.length === 0 && (
-              <div className="text-center text-slate-400 bg-slate-800/50 p-6 rounded-xl border border-dashed border-slate-700">
-                <p className="text-sm mb-2">💡 尚未偵測到雲端戰術資料</p>
-                <button onClick={() => { setSelectedComp(null); setPhase('draft'); }} className="mt-4 bg-slate-700 text-xs px-4 py-2 rounded-lg font-bold">不選陣容，直接進入一般 BP</button>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -149,7 +134,6 @@ export default function App() {
           </h2>
 
           <div className="flex gap-2 mb-4 shrink-0 items-start">
-            {/* 我方陣容面版 */}
             <div className="flex-1 bg-blue-950/30 border border-blue-500/20 rounded-lg p-2 min-h-[60px]">
               <h3 className="text-[11px] font-bold text-blue-400 mb-1.5 border-b border-blue-500/20 pb-1 flex justify-between">
                 <span>我方陣容</span><span>{ourPicks.length}/5</span>
@@ -161,7 +145,6 @@ export default function App() {
               </div>
             </div>
             
-            {/* 敵方陣容與預測面版 */}
             <div className="flex-1 bg-red-950/20 border border-red-500/10 rounded-lg p-2 min-h-[60px]">
               <h3 className="text-[11px] font-bold text-red-400 mb-1.5 border-b border-red-500/10 pb-1 flex justify-between">
                 <span>敵方陣容</span><span>{enemyPicks.length}/5</span>
@@ -172,11 +155,10 @@ export default function App() {
                 }
               </div>
               
-              {/* 預測敵方體系區塊 */}
               {predictedEnemyComps.length > 0 && (
                 <div className="pt-2 border-t border-red-900/50">
                   <div className="text-[10px] text-red-400/80 mb-1 font-bold">⚠️ 敵方體系預測：</div>
-                  {predictedEnemyComps.map((pComp, idx) => (
+                  {predictedEnemyComps.slice(0, 2).map((pComp, idx) => (
                     <div key={idx} className="text-[10px] bg-black/40 text-red-200 px-1.5 py-1 rounded border border-red-900/50 mb-1">
                       <span className="font-bold text-red-300">{pComp.comp_name}</span>
                       <div className="text-[9px] text-slate-400 mt-0.5">[{pComp.matchReasons.join(' + ')}]</div>
@@ -191,19 +173,15 @@ export default function App() {
             {HERO_DB
               .filter(h => !ourPicks.find(p => p.id === h.id) && !enemyPicks.find(e => e.id === h.id))
               .map(h => {
-                let score = 0; 
-                let reasons = [];
+                let score = 0; let reasons = [];
                 if (h.trap) { score -= 2000; }
-                enemyPicks.forEach(e => { 
-                  if (h.counters && h.counters.includes(e.id)) { score += 150; reasons.push(`完剋: ${e.name}`); } 
-                });
+                enemyPicks.forEach(e => { if (h.counters && h.counters.includes(e.id)) { score += 150; reasons.push(`完剋: ${e.name}`); } });
                 if (draftOrder[currentTurn] === 0 && selectedComp) {
                    if (h.id === selectedComp.core_hero_id) { score += 300; reasons.push('核心必選'); } 
                    else if (selectedComp.synergy_hero_ids.includes(h.id)) { score += 100; reasons.push('陣容連動'); }
                 }
                 return { ...h, score, reasons };
-              })
-              .sort((a, b) => b.score - a.score)
+              }).sort((a, b) => b.score - a.score)
               .map(h => (
                 <button key={h.id} onClick={() => handlePick(h)} className={`p-3 rounded-xl text-left shadow transition-all duration-150 active:scale-95 border ${h.score >= 300 ? 'bg-blue-950/70 border-blue-500 text-blue-200' : h.score > 0 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : 'bg-slate-800/80 border-slate-700/60'}`}>
                   <div className="flex justify-between items-center mb-1">
@@ -219,23 +197,82 @@ export default function App() {
         </div>
       )}
 
+      {/* 結算面版更新：加入陣容名稱與優缺點分析 */}
       {phase === 'analysis' && (
-        <div className="text-center pt-6">
+        <div className="text-center pt-4 pb-10">
           <h2 className="text-2xl font-bold text-green-400 mb-6 tracking-wide">⚔️ BP 推演完成 ⚔️</h2>
-          <div className="flex justify-between gap-3 mb-8">
-            <div className="bg-blue-950/30 border border-blue-500/20 p-4 rounded-xl w-1/2 shadow-inner">
-              <h3 className="font-bold text-blue-400 border-b border-blue-500/20 pb-2 mb-3 text-base">我方陣容</h3>
+          
+          <div className="flex flex-col md:flex-row justify-between gap-4 mb-8 text-left">
+            
+            {/* 我方面板 */}
+            <div className="bg-blue-950/30 border border-blue-500/20 p-4 rounded-xl flex-1 shadow-inner">
+              <h3 className="font-bold text-blue-400 border-b border-blue-500/20 pb-2 mb-3 text-lg flex items-center justify-between">
+                <span>我方陣容</span>
+                {selectedComp && <span className="text-sm bg-blue-900/50 text-yellow-400 px-2 py-1 rounded border border-blue-700/50">{selectedComp.comp_name}</span>}
+              </h3>
+              
+              {selectedComp && (selectedComp.advantage || selectedComp.disadvantage) && (
+                <div className="mb-4 space-y-2">
+                  {selectedComp.advantage && (
+                    <div className="text-[11px] leading-relaxed bg-green-950/40 text-green-300 p-2 rounded border border-green-800/50">
+                      <span className="font-bold block mb-0.5">✅ 陣容優勢：</span>{selectedComp.advantage}
+                    </div>
+                  )}
+                  {selectedComp.disadvantage && (
+                    <div className="text-[11px] leading-relaxed bg-red-950/40 text-red-300 p-2 rounded border border-red-800/50">
+                      <span className="font-bold block mb-0.5">⚠️ 陣容劣勢：</span>{selectedComp.disadvantage}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
-                {ourPicks.map((p, i) => <div key={i} className="flex justify-between text-sm bg-slate-900/50 p-2 rounded border border-slate-800"><span className="font-bold">{p.name}</span><span className="text-[10px] text-slate-500">{p.role}</span></div>)}
+                {ourPicks.map((p, i) => (
+                  <div key={i} className="flex justify-between items-center text-sm bg-slate-900/50 p-2.5 rounded border border-slate-800">
+                    <span className="font-bold">{p.name}</span>
+                    <span className="text-[10px] text-slate-500">{p.role}</span>
+                  </div>
+                ))}
               </div>
             </div>
-            <div className="bg-red-950/20 border border-red-500/10 p-4 rounded-xl w-1/2 shadow-inner">
-              <h3 className="font-bold text-red-400 border-b border-red-500/10 pb-2 mb-3 text-base">敵方陣容</h3>
+            
+            {/* 敵方面板 */}
+            <div className="bg-red-950/20 border border-red-500/10 p-4 rounded-xl flex-1 shadow-inner">
+              <h3 className="font-bold text-red-400 border-b border-red-500/10 pb-2 mb-3 text-lg flex items-center justify-between">
+                <span>敵方陣容</span>
+                {finalEnemyComp ? (
+                  <span className="text-sm bg-red-900/40 text-yellow-400 px-2 py-1 rounded border border-red-800/50">{finalEnemyComp.comp_name}</span>
+                ) : (
+                  <span className="text-sm bg-slate-800 text-slate-400 px-2 py-1 rounded border border-slate-700">未知體系</span>
+                )}
+              </h3>
+
+              {finalEnemyComp && (finalEnemyComp.advantage || finalEnemyComp.disadvantage) && (
+                <div className="mb-4 space-y-2">
+                  {finalEnemyComp.advantage && (
+                    <div className="text-[11px] leading-relaxed bg-green-950/40 text-green-300 p-2 rounded border border-green-800/50">
+                      <span className="font-bold block mb-0.5">✅ 陣容優勢：</span>{finalEnemyComp.advantage}
+                    </div>
+                  )}
+                  {finalEnemyComp.disadvantage && (
+                    <div className="text-[11px] leading-relaxed bg-red-950/40 text-red-300 p-2 rounded border border-red-800/50">
+                      <span className="font-bold block mb-0.5">⚠️ 陣容劣勢：</span>{finalEnemyComp.disadvantage}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
-                {enemyPicks.map((p, i) => <div key={i} className="flex justify-between text-sm bg-slate-900/50 p-2 rounded border border-slate-800"><span className="font-bold">{p.name}</span><span className="text-[10px] text-slate-500">{p.role}</span></div>)}
+                {enemyPicks.map((p, i) => (
+                  <div key={i} className="flex justify-between items-center text-sm bg-slate-900/50 p-2.5 rounded border border-slate-800">
+                    <span className="font-bold">{p.name}</span>
+                    <span className="text-[10px] text-slate-500">{p.role}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
+          
           <button onClick={() => window.location.reload()} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">
             <RefreshCw size={20} /> 準備下一局推演
           </button>
