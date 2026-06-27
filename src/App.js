@@ -9,10 +9,11 @@ export default function App() {
   const [HERO_DB, setHERO_DB] = useState([]);
   const [TACTICS_DB, setTACTICS_DB] = useState([]);
   
-  const [phase, setPhase] = useState('init'); 
+  const [phase, setPhase] = useState('init'); // init, ban, comp_select, draft, analysis
   const [isFirstPick, setIsFirstPick] = useState(true);
   const [selectedComp, setSelectedComp] = useState(null);
   
+  const [bannedHeroes, setBannedHeroes] = useState([]);
   const [ourPicks, setOurPicks] = useState([]);
   const [enemyPicks, setEnemyPicks] = useState([]);
   
@@ -38,13 +39,12 @@ export default function App() {
     if (HERO_CSV_URL.includes('http')) {
       fetch(HERO_CSV_URL).then(res => res.text()).then(text => {
         const formattedData = parseCSV(text).map(obj => {
-          // 支援多路線解析，將 primary_roles 切割成陣列
           const rolesArr = obj.primary_roles ? obj.primary_roles.split(',').map(r => r.trim()) : ['其他'];
           return {
             id: obj.hero_id,
             name: obj.hero_name,
-            role: rolesArr[0], // UI 顯示預設拿第一順位路線
-            roles: rolesArr,   // 邏輯運算用，包含所有錯位可能
+            role: rolesArr[0], 
+            roles: rolesArr,
             counters: obj.counters ? obj.counters.split(',').map(c => c.trim()) : [],
             trap: obj.is_trap?.toLowerCase() === 'true'
           };
@@ -85,7 +85,17 @@ export default function App() {
   const handlePick = (hero) => {
     if (draftOrder[currentTurn] === 0) setOurPicks([...ourPicks, hero]);
     else setEnemyPicks([...enemyPicks, hero]);
-    if (currentTurn + 1 === 10) setPhase('analysis');
+    
+    const nextTurn = currentTurn + 1;
+    
+    // 如果選滿了就進入結算
+    if (nextTurn === 10) {
+      setPhase('analysis');
+    } 
+    // 【核心邏輯】如果我是後選(Red)，且對手剛選完第 1 隻角色，自動跳轉去選擇針對陣容
+    else if (!isFirstPick && nextTurn === 1 && !selectedComp) {
+      setPhase('comp_select');
+    }
   };
 
   const finalEnemyComp = predictedEnemyComps.length > 0 ? predictedEnemyComps[0] : null;
@@ -96,19 +106,73 @@ export default function App() {
       {phase === 'init' && (
         <div className="text-center pt-20">
           <h1 className="text-2xl font-bold mb-8 tracking-wider">傳說對決 BP 教練系統</h1>
-          <button onClick={() => { setIsFirstPick(true); setPhase('comp_select'); }} className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 transition-all p-4 rounded-xl mb-4 font-bold text-lg shadow-lg">
+          <button onClick={() => { setIsFirstPick(true); setPhase('ban'); }} className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 transition-all p-4 rounded-xl mb-4 font-bold text-lg shadow-lg">
             首選 (藍方先亮牌)
           </button>
-          <button onClick={() => { setIsFirstPick(false); setPhase('comp_select'); }} className="w-full bg-red-600 hover:bg-red-500 active:scale-95 transition-all p-4 rounded-xl font-bold text-lg shadow-lg">
+          <button onClick={() => { setIsFirstPick(false); setPhase('ban'); }} className="w-full bg-red-600 hover:bg-red-500 active:scale-95 transition-all p-4 rounded-xl font-bold text-lg shadow-lg">
             後選 (紅方拿兩隻)
           </button>
         </div>
       )}
 
+      {/* 新增：Ban 角階段 */}
+      {phase === 'ban' && (
+        <div className="flex flex-col h-[calc(100vh-2rem)]">
+          <div className="text-center mb-4 shrink-0">
+            <h2 className="font-bold text-xl text-red-400 tracking-wide mb-1">禁用英雄階段 (Ban)</h2>
+            <p className="text-xs text-slate-400">請點擊選擇雙方禁用的英雄 ({bannedHeroes.length}/6)</p>
+          </div>
+          
+          <div className="grid grid-cols-4 gap-2 overflow-y-auto pr-1 flex-1 pb-4">
+            {HERO_DB.map(h => {
+              const isBanned = bannedHeroes.find(b => b.id === h.id);
+              return (
+                <button 
+                  key={h.id} 
+                  onClick={() => {
+                    if (isBanned) setBannedHeroes(bannedHeroes.filter(b => b.id !== h.id));
+                    else if (bannedHeroes.length < 6) setBannedHeroes([...bannedHeroes, h]);
+                  }} 
+                  className={`p-2 rounded-lg text-center transition-all border ${
+                    isBanned ? 'bg-red-950/80 border-red-500 text-red-300 scale-95 opacity-80' : 'bg-slate-800 border-slate-700 text-slate-300'
+                  }`}
+                >
+                  <div className="font-bold text-xs">{h.name}</div>
+                </button>
+              );
+            })}
+          </div>
+          
+          <button 
+            onClick={() => {
+              // 首選：Ban 完直接選陣容。後選：Ban 完先讓對面選一隻，再選陣容。
+              if (isFirstPick) setPhase('comp_select');
+              else setPhase('draft');
+            }} 
+            className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 transition-all p-4 rounded-xl font-bold text-lg shadow-lg shrink-0 mt-2"
+          >
+            確認禁用並下一步
+          </button>
+        </div>
+      )}
+
+      {/* 陣容選擇階段 */}
       {phase === 'comp_select' && (
-        <div>
-          <h2 className="text-center mb-6 font-bold text-xl text-yellow-400 tracking-wide">選擇本局核心戰術體系</h2>
-          <div className="space-y-3">
+        <div className="flex flex-col h-[calc(100vh-2rem)]">
+          <div className="text-center mb-6 shrink-0">
+            <h2 className="font-bold text-xl text-yellow-400 tracking-wide mb-3">選擇本局核心戰術體系</h2>
+            
+            {/* 後發制人提示區塊 */}
+            {!isFirstPick && enemyPicks.length > 0 && (
+              <div className="bg-red-950/40 border border-red-900/50 p-3 rounded-lg inline-block shadow-inner w-full">
+                <span className="text-sm text-slate-400">對手首搶了：</span>
+                <span className="font-bold text-red-400 ml-1 text-lg">{enemyPicks[0].name}</span>
+                <div className="text-[11px] text-slate-500 mt-1">請根據敵方首選，決定我方的應對陣容</div>
+              </div>
+            )}
+          </div>
+          
+          <div className="space-y-3 overflow-y-auto flex-1 pb-4">
             {TACTICS_DB.map(comp => (
               <button key={comp.comp_id} onClick={() => { setSelectedComp(comp); setPhase('draft'); }} className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-blue-500 text-left transition-all active:scale-98">
                 <div className="flex justify-between items-center">
@@ -121,10 +185,21 @@ export default function App() {
         </div>
       )}
 
+      {/* Draft 階段 */}
       {phase === 'draft' && currentTurn < 10 && (
         <div className="flex flex-col h-[calc(100vh-2rem)]">
+          {/* Ban 角展示區 (縮小顯示) */}
+          {bannedHeroes.length > 0 && (
+            <div className="flex gap-1.5 mb-2 shrink-0 overflow-x-auto text-[10px] items-center bg-slate-950/50 p-1.5 rounded-lg border border-red-900/30">
+              <span className="text-red-500 font-bold ml-1 shrink-0">禁用:</span>
+              <div className="flex gap-1 whitespace-nowrap">
+                {bannedHeroes.map(b => <span key={b.id} className="bg-red-950/80 text-slate-400 px-1.5 py-0.5 rounded border border-red-900/40">{b.name}</span>)}
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-between items-center mb-3 bg-slate-800/40 p-2 rounded-lg border border-slate-800 text-xs text-slate-400 shrink-0">
-             <div>核心體系: <span className="text-yellow-400 font-bold">{selectedComp ? selectedComp.comp_name : "未指定"}</span></div>
+             <div>核心體系: <span className="text-yellow-400 font-bold">{selectedComp ? selectedComp.comp_name : "尚未指定"}</span></div>
              <div>進度: <span className="text-white font-mono">{currentTurn + 1}</span> / 10 手</div>
           </div>
           
@@ -170,43 +245,28 @@ export default function App() {
 
           <div className="grid grid-cols-2 gap-3 overflow-y-auto pr-1 flex-1 pb-4">
             {HERO_DB
-              .filter(h => !ourPicks.find(p => p.id === h.id) && !enemyPicks.find(e => e.id === h.id))
+              // 過濾掉已經選走，以及已經 Ban 掉的英雄
+              .filter(h => !ourPicks.find(p => p.id === h.id) && !enemyPicks.find(e => e.id === h.id) && !bannedHeroes.find(b => b.id === h.id))
               .map(h => {
                 let score = 0; let reasons = [];
-                
-                // 取得當前操作隊伍已經確定的「主要分路」集合
                 const currentTeamPicks = draftOrder[currentTurn] === 0 ? ourPicks : enemyPicks;
                 const filledRoles = currentTeamPicks.map(p => p.roles[0]);
                 
-                // 規則 A: 過濾陷阱
                 if (h.trap) { score -= 2000; }
 
-                // 規則 B: 分路衝突檢測 (Role Conflict)
-                // 如果這隻英雄能走的路，全部都已經被現有陣容的主要分路佔滿了，重罰降級
                 const isRoleConflict = h.roles.every(r => filledRoles.includes(r));
                 if (isRoleConflict && currentTeamPicks.length > 0) {
                     score -= 1000;
                     reasons.push('路線重疊');
                 }
                 
-                // 規則 C: 我方陣容體系優先
                 if (draftOrder[currentTurn] === 0 && selectedComp) {
-                   if (h.id === selectedComp.core_hero_id) { 
-                       score += 1000; 
-                       reasons.push('核心必選'); 
-                   } 
-                   else if (selectedComp.synergy_hero_ids.includes(h.id)) { 
-                       score += 500; 
-                       reasons.push('陣容連動'); 
-                   }
+                   if (h.id === selectedComp.core_hero_id) { score += 1000; reasons.push('核心必選'); } 
+                   else if (selectedComp.synergy_hero_ids.includes(h.id)) { score += 500; reasons.push('陣容連動'); }
                 }
 
-                // 規則 D: 反制敵方
                 enemyPicks.forEach(e => { 
-                  if (h.counters && h.counters.includes(e.id)) { 
-                      score += 100; 
-                      reasons.push(`完剋: ${e.name}`); 
-                  } 
+                  if (h.counters && h.counters.includes(e.id)) { score += 100; reasons.push(`完剋: ${e.name}`); } 
                 });
                 
                 return { ...h, score, reasons };
@@ -215,7 +275,7 @@ export default function App() {
                 <button key={h.id} onClick={() => handlePick(h)} className={`p-3 rounded-xl text-left shadow transition-all duration-150 active:scale-95 border ${
                   h.score >= 500 ? 'bg-blue-950/70 border-blue-500 text-blue-200' : 
                   h.score > 0 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : 
-                  h.score < 0 ? 'bg-slate-900/40 border-slate-800/40 text-slate-600 opacity-50 grayscale' : // 扣分的直接變灰變暗
+                  h.score < 0 ? 'bg-slate-900/40 border-slate-800/40 text-slate-600 opacity-50 grayscale' : 
                   'bg-slate-800/80 border-slate-700/60'
                 }`}>
                   <div className="flex justify-between items-center mb-1">
