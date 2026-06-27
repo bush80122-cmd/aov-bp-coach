@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw } from 'lucide-react';
 
-// === 請在此處填入你從 Google Sheet 發布的兩個 CSV 連結 ===
+// === 英雄表與戰術陣容表 CSV 連結 ===
 const HERO_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?output=csv";
 const TACTICS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?gid=1330847132&single=true&output=csv"; 
 
@@ -74,7 +74,9 @@ export default function App() {
               comp_id: obj.comp_id,
               comp_name: obj.comp_name,
               core_hero_id: obj.core_hero_id,
-              synergy_hero_ids: rawSynergy ? rawSynergy.split(',').map(c => c.trim()) : []
+              synergy_hero_ids: rawSynergy ? rawSynergy.split(',').map(c => c.trim()) : [],
+              // 抓取勝率欄位 (相容 'win_rate' 或 '勝率' 兩種命名)
+              win_rate: obj.win_rate || obj['勝率'] || "" 
             };
           });
           setTACTICS_DB(formattedTactics);
@@ -128,15 +130,22 @@ export default function App() {
               <button 
                 key={comp.comp_id} 
                 onClick={() => { setSelectedComp(comp); setPhase('draft'); }} 
-                className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-blue-500 text-left font-bold text-lg transition-all active:scale-98"
+                className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-blue-500 text-left transition-all active:scale-98"
               >
-                {comp.comp_name}
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-lg">{comp.comp_name}</span>
+                  {/* 新增勝率資料顯示 */}
+                  {comp.win_rate && (
+                    <span className="text-sm font-mono bg-slate-900 text-green-400 px-2 py-1 rounded border border-slate-600">
+                      勝率 {comp.win_rate}
+                    </span>
+                  )}
+                </div>
               </button>
             ))}
             {TACTICS_DB.length === 0 && (
               <div className="text-center text-slate-400 bg-slate-800/50 p-6 rounded-xl border border-dashed border-slate-700">
                 <p className="text-sm mb-2">💡 尚未偵測到雲端戰術資料</p>
-                <p className="text-xs text-slate-500">請在代碼上方填入 <code>TACTICS_CSV_URL</code> 分頁連結後即可啟動陣容系統。</p>
                 <button 
                   onClick={() => { setSelectedComp(null); setPhase('draft'); }} 
                   className="mt-4 bg-slate-700 text-xs px-4 py-2 rounded-lg font-bold"
