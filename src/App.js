@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, AlertTriangle, ShieldAlert } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ShieldAlert, BookOpen } from 'lucide-react';
 
 // === 英雄表與戰術陣容表 CSV 連結 ===
 const HERO_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?output=csv";
@@ -14,7 +14,7 @@ export default function App() {
   const [isFirstPick, setIsFirstPick] = useState(true);
   
   const [selectedComp, setSelectedComp] = useState(null);
-  const [adjustReason, setAdjustReason] = useState(""); // 轉陣原因提示
+  const [adjustReason, setAdjustReason] = useState(""); 
   
   const [bannedHeroes, setBannedHeroes] = useState([]);
   const [ourPicks, setOurPicks] = useState([]);
@@ -63,19 +63,21 @@ export default function App() {
           comp_name: obj.comp_name,
           core_hero_id: obj.core_hero_id,
           synergy_hero_ids: obj.synergy_hero_ids ? obj.synergy_hero_ids.split(',').map(c => c.trim()) : [],
-          must_ban: obj.must_ban_heroes ? obj.must_ban_heroes.split(',').map(c => c.trim()) : [], // 害怕的英雄
-          advantage_vs: obj.advantage_vs ? obj.advantage_vs.split(',').map(c => c.trim()) : [], // 克制的陣容ID
-          disadvantage_vs: obj.disadvantage_vs ? obj.disadvantage_vs.split(',').map(c => c.trim()) : [], // 被克的陣容ID
+          must_ban: obj.must_ban_heroes ? obj.must_ban_heroes.split(',').map(c => c.trim()) : [],
+          advantage_vs: obj.advantage_vs ? obj.advantage_vs.split(',').map(c => c.trim()) : [], 
+          disadvantage_vs: obj.disadvantage_vs ? obj.disadvantage_vs.split(',').map(c => c.trim()) : [], 
           win_rate: obj.win_rate || obj['勝率'] || "",
-          advantage: obj.advantage || obj['優點'] || "",
-          disadvantage: obj.disadvantage || obj['缺點'] || ""
+          // 更新：對齊表單新的欄位名稱
+          advantage_comp: obj.advantage_comp || "",
+          disadvantage_comp: obj.disadvantage_comp || "",
+          priority_lane: obj.priority_lane || "",
+          tactical_reason: obj.tactical_reason || ""
         }));
         setTACTICS_DB(formattedTactics);
       }).catch(err => console.error(err));
     }
   }, []);
 
-  // 敵方體系預測
   const predictedEnemyComps = useMemo(() => {
     if (enemyPicks.length === 0 || TACTICS_DB.length === 0) return [];
     return TACTICS_DB.map(comp => {
@@ -91,7 +93,6 @@ export default function App() {
 
   const finalEnemyComp = predictedEnemyComps.length > 0 ? predictedEnemyComps[0] : null;
 
-  // 處理 Ban 結束後的邏輯：檢查是否需要被迫轉陣
   const handleBanComplete = () => {
     const isCoreBanned = bannedHeroes.some(b => b.id === selectedComp?.core_hero_id);
     if (isCoreBanned) {
@@ -118,15 +119,12 @@ export default function App() {
       return;
     }
 
-    // 動態轉陣攔截器 (Pivot Interceptor)
-    if (draftOrder[currentTurn] === 1) { // 剛剛是敵方選角
-      // 1. 如果我們是後選(紅方)，且對方剛選完第一隻 -> 依據對方首搶推薦轉陣
+    if (draftOrder[currentTurn] === 1) { 
       if (!isFirstPick && nextTurn === 1) {
          setAdjustReason(`敵方首搶了 [${hero.name}]，請根據預測，決定我方針對體系！`);
          setPhase('adjust_comp');
          return;
       }
-      // 2. 如果選角過程中，我們的核心被對面搶走了
       if (selectedComp && hero.id === selectedComp.core_hero_id) {
          setAdjustReason(`糟糕！我方預定核心 [${hero.name}] 被敵方搶走，請立即轉陣！`);
          setPhase('adjust_comp');
@@ -186,12 +184,10 @@ export default function App() {
           
           <div className="grid grid-cols-3 gap-2 overflow-y-auto pr-1 flex-1 pb-4">
             {HERO_DB
-              // 將推薦 Ban 的英雄排在前面
               .sort((a, b) => {
                 const aMust = selectedComp?.must_ban.includes(a.id) ? 1 : 0;
                 const bMust = selectedComp?.must_ban.includes(b.id) ? 1 : 0;
                 if (aMust !== bMust) return bMust - aMust;
-                // 非體系角排前面
                 const aSys = (a.id === selectedComp?.core_hero_id || selectedComp?.synergy_hero_ids.includes(a.id)) ? 1 : 0;
                 const bSys = (b.id === selectedComp?.core_hero_id || selectedComp?.synergy_hero_ids.includes(b.id)) ? 1 : 0;
                 return aSys - bSys;
@@ -237,7 +233,6 @@ export default function App() {
             <p className="text-xs text-red-200">{adjustReason}</p>
           </div>
           
-          {/* 顯示敵方可能陣容，幫助決策 */}
           {predictedEnemyComps.length > 0 && (
             <div className="mb-4 p-3 bg-slate-800/80 rounded-lg border border-slate-700 shrink-0">
               <div className="text-[11px] text-slate-400 mb-1">敵方高機率體系：</div>
@@ -248,16 +243,13 @@ export default function App() {
           <h3 className="font-bold text-sm text-slate-300 mb-3 shrink-0">系統推薦轉移陣容：</h3>
           <div className="space-y-3 overflow-y-auto flex-1 pb-4">
             {TACTICS_DB
-              // 過濾掉核心已經被 Ban 或被選走的陣容
               .filter(comp => !bannedHeroes.some(b=>b.id===comp.core_hero_id) && !enemyPicks.some(e=>e.id===comp.core_hero_id))
               .map(comp => {
                 let score = 0;
                 let tags = [];
-                // 如果預測出敵方陣容，且該陣容有優勢 (Requirement 2)
                 if (finalEnemyComp && comp.advantage_vs.includes(finalEnemyComp.comp_id)) {
                   score += 200; tags.push('🛡️ 完剋敵方體系');
                 }
-                // 如果我們已經選了某些英雄，且符合這個新陣容 (Requirement 3)
                 ourPicks.forEach(p => {
                   if (comp.core_hero_id === p.id) { score += 150; tags.push(`延續核心:${p.name}`); }
                   else if (comp.synergy_hero_ids.includes(p.id)) { score += 50; tags.push(`延續連動:${p.name}`); }
@@ -284,7 +276,6 @@ export default function App() {
       {/* ================= 階段五：Draft 選角 ================= */}
       {phase === 'draft' && currentTurn < 10 && (
         <div className="flex flex-col h-[calc(100vh-2rem)]">
-          {/* Ban 角展示區 */}
           {bannedHeroes.length > 0 && (
             <div className="flex gap-1.5 mb-2 shrink-0 overflow-x-auto text-[10px] items-center bg-slate-950/50 p-1.5 rounded-lg border border-red-900/30">
               <span className="text-red-500 font-bold ml-1 shrink-0">禁用:</span>
@@ -354,7 +345,6 @@ export default function App() {
                     reasons.push('路線重疊');
                 }
                 
-                // 動態推薦演算法
                 if (draftOrder[currentTurn] === 0) {
                    if (selectedComp) {
                      if (h.id === selectedComp.core_hero_id) { score += 1000; reasons.push('核心必選'); } 
@@ -394,47 +384,90 @@ export default function App() {
 
       {/* ================= 階段六：分析結算 ================= */}
       {phase === 'analysis' && (
-        <div className="text-center pt-4 pb-10">
-          <h2 className="text-2xl font-bold text-green-400 mb-6 tracking-wide">⚔️ BP 推演完成 ⚔️</h2>
+        <div className="text-center pt-4 pb-10 flex flex-col h-full">
+          <h2 className="text-2xl font-bold text-green-400 mb-6 tracking-wide shrink-0">⚔️ BP 推演完成 ⚔️</h2>
           
-          <div className="flex flex-col md:flex-row justify-between gap-4 mb-8 text-left">
-            <div className="bg-blue-950/30 border border-blue-500/20 p-4 rounded-xl flex-1 shadow-inner">
-              <h3 className="font-bold text-blue-400 border-b border-blue-500/20 pb-2 mb-3 text-lg flex items-center justify-between">
-                <span>我方陣容</span>
-                {selectedComp && <span className="text-sm bg-blue-900/50 text-yellow-400 px-2 py-1 rounded border border-blue-700/50">{selectedComp.comp_name}</span>}
+          <div className="flex flex-col gap-4 mb-6 text-left shrink-0">
+            <div className="bg-blue-950/30 border border-blue-500/20 p-4 rounded-xl shadow-inner">
+              <h3 className="font-bold text-blue-400 border-b border-blue-500/20 pb-2 mb-4 text-lg flex items-center justify-between">
+                <span>我方最終陣容</span>
+                {selectedComp && <span className="text-sm bg-blue-900/50 text-yellow-400 px-3 py-1 rounded border border-blue-700/50">{selectedComp.comp_name}</span>}
               </h3>
-              
-              {selectedComp && (selectedComp.advantage || selectedComp.disadvantage) && (
-                <div className="mb-4 space-y-2">
-                  {selectedComp.advantage && <div className="text-[11px] leading-relaxed bg-green-950/40 text-green-300 p-2 rounded border border-green-800/50"><span className="font-bold block mb-0.5">✅ 陣容優勢：</span>{selectedComp.advantage}</div>}
-                  {selectedComp.disadvantage && <div className="text-[11px] leading-relaxed bg-red-950/40 text-red-300 p-2 rounded border border-red-800/50"><span className="font-bold block mb-0.5">⚠️ 陣容劣勢：</span>{selectedComp.disadvantage}</div>}
-                </div>
-              )}
-
-              <div className="space-y-2">
-                {ourPicks.map((p, i) => <div key={i} className="flex justify-between items-center text-sm bg-slate-900/50 p-2.5 rounded border border-slate-800"><span className="font-bold">{p.name}</span><span className="text-[10px] text-slate-500">{p.roles[0]}</span></div>)}
+              <div className="flex flex-wrap gap-2">
+                {ourPicks.map((p, i) => (
+                  <div key={i} className="text-sm bg-slate-900/50 px-3 py-1.5 rounded border border-slate-800 flex items-center gap-2">
+                    <span className="font-bold">{p.name}</span>
+                    <span className="text-[10px] text-blue-400">{p.roles[0]}</span>
+                  </div>
+                ))}
               </div>
             </div>
             
-            <div className="bg-red-950/20 border border-red-500/10 p-4 rounded-xl flex-1 shadow-inner">
-              <h3 className="font-bold text-red-400 border-b border-red-500/10 pb-2 mb-3 text-lg flex items-center justify-between">
-                <span>敵方陣容</span>
-                {finalEnemyComp ? <span className="text-sm bg-red-900/40 text-yellow-400 px-2 py-1 rounded border border-red-800/50">{finalEnemyComp.comp_name}</span> : <span className="text-sm bg-slate-800 text-slate-400 px-2 py-1 rounded border border-slate-700">未知體系</span>}
+            <div className="bg-red-950/20 border border-red-500/10 p-4 rounded-xl shadow-inner">
+              <h3 className="font-bold text-red-400 border-b border-red-500/10 pb-2 mb-4 text-lg flex items-center justify-between">
+                <span>敵方最終陣容</span>
+                {finalEnemyComp ? <span className="text-sm bg-red-900/40 text-yellow-400 px-3 py-1 rounded border border-red-800/50">{finalEnemyComp.comp_name}</span> : <span className="text-sm bg-slate-800 text-slate-400 px-3 py-1 rounded border border-slate-700">未知體系</span>}
               </h3>
-
-              {finalEnemyComp && (finalEnemyComp.advantage || finalEnemyComp.disadvantage) && (
-                <div className="mb-4 space-y-2">
-                  {finalEnemyComp.advantage && <div className="text-[11px] leading-relaxed bg-green-950/40 text-green-300 p-2 rounded border border-green-800/50"><span className="font-bold block mb-0.5">✅ 陣容優勢：</span>{finalEnemyComp.advantage}</div>}
-                  {finalEnemyComp.disadvantage && <div className="text-[11px] leading-relaxed bg-red-950/40 text-red-300 p-2 rounded border border-red-800/50"><span className="font-bold block mb-0.5">⚠️ 陣容劣勢：</span>{finalEnemyComp.disadvantage}</div>}
-                </div>
-              )}
-
-              <div className="space-y-2">
-                {enemyPicks.map((p, i) => <div key={i} className="flex justify-between items-center text-sm bg-slate-900/50 p-2.5 rounded border border-slate-800"><span className="font-bold">{p.name}</span><span className="text-[10px] text-slate-500">{p.roles[0]}</span></div>)}
+              <div className="flex flex-wrap gap-2">
+                {enemyPicks.map((p, i) => (
+                  <div key={i} className="text-sm bg-slate-900/50 px-3 py-1.5 rounded border border-slate-800 flex items-center gap-2">
+                    <span className="font-bold">{p.name}</span>
+                    <span className="text-[10px] text-red-400">{p.roles[0]}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
-          <button onClick={() => window.location.reload()} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">
+
+          {/* 下半部：💡 教練賽前戰略分析面板 */}
+          <div className="bg-slate-800/60 border border-yellow-500/30 p-4 rounded-xl text-left mb-8 shadow-lg">
+            <h3 className="text-lg font-bold text-yellow-400 mb-4 flex items-center gap-2">
+              <BookOpen size={20} /> 教練賽前戰略分析
+            </h3>
+
+            {/* Part 1: 陣容優缺點分析 */}
+            <div className="mb-5">
+              <h4 className="text-sm font-bold text-slate-300 border-b border-slate-600 pb-1 mb-3">1. 雙方陣容優劣勢</h4>
+              <div className="flex flex-col gap-3">
+                {/* 我方分析 */}
+                <div className="bg-blue-900/20 p-3 rounded-lg border border-blue-800/30 text-xs">
+                  <span className="font-bold text-blue-400 block mb-1.5">【我方】{selectedComp ? selectedComp.comp_name : '未定'}</span>
+                  {selectedComp?.advantage_comp ? <div className="text-green-300 mb-1"><span className="font-bold mr-1">✅ 優勢：</span>{selectedComp.advantage_comp}</div> : null}
+                  {selectedComp?.disadvantage_comp ? <div className="text-red-300"><span className="font-bold mr-1">⚠️ 劣勢：</span>{selectedComp.disadvantage_comp}</div> : null}
+                </div>
+                
+                {/* 敵方分析 */}
+                <div className="bg-red-900/20 p-3 rounded-lg border border-red-800/30 text-xs">
+                  <span className="font-bold text-red-400 block mb-1.5">【敵方】{finalEnemyComp ? finalEnemyComp.comp_name : '未知體系'}</span>
+                  {finalEnemyComp?.advantage_comp ? <div className="text-green-300 mb-1"><span className="font-bold mr-1">✅ 優勢：</span>{finalEnemyComp.advantage_comp}</div> : null}
+                  {finalEnemyComp?.disadvantage_comp ? <div className="text-red-300"><span className="font-bold mr-1">⚠️ 劣勢：</span>{finalEnemyComp.disadvantage_comp}</div> : null}
+                </div>
+              </div>
+            </div>
+
+            {/* Part 2: 開局及營運重點 */}
+            {selectedComp && (selectedComp.priority_lane || selectedComp.tactical_reason) && (
+              <div>
+                <h4 className="text-sm font-bold text-slate-300 border-b border-slate-600 pb-1 mb-3">2. 開局與營運重點</h4>
+                <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-700 text-xs leading-relaxed">
+                  {selectedComp.priority_lane && (
+                    <div className="mb-2">
+                      <span className="font-bold text-purple-400 block mb-0.5">📍 優先幫抓 / 投入資源：</span>
+                      <span className="text-slate-200">{selectedComp.priority_lane}</span>
+                    </div>
+                  )}
+                  {selectedComp.tactical_reason && (
+                    <div>
+                      <span className="font-bold text-amber-400 block mb-0.5">💡 戰術原因：</span>
+                      <span className="text-slate-200">{selectedComp.tactical_reason}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button onClick={() => window.location.reload()} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all mt-auto shrink-0">
             <RefreshCw size={20} /> 準備下一局推演
           </button>
         </div>
