@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RefreshCw } from 'lucide-react';
 
 export default function App() {
   const [HERO_DB, setHERO_DB] = useState([]);
-  const [phase, setPhase] = useState('init'); // init, order, ban, draft
-  const [isFirstPick, setIsFirstPick] = useState(null);
+  const [phase, setPhase] = useState('init'); // init, comp_select, draft
+  const [selectedComp, setSelectedComp] = useState(null);
   const [ourPicks, setOurPicks] = useState([]);
   const [enemyPicks, setEnemyPicks] = useState([]);
   
-  // 紀錄目前輪到誰選：0:我, 1:敵 (依據蛇形順序)
   const draftOrder = [0, 1, 1, 0, 0, 1, 1, 0, 0, 1];
   const currentTurn = ourPicks.length + enemyPicks.length;
 
@@ -36,35 +35,39 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-white p-4 max-w-md mx-auto">
       {phase === 'init' && (
         <div className="text-center pt-20">
-          <h1 className="text-2xl font-bold mb-8">傳說對決BP教練系統</h1>
-          <button onClick={() => { setIsFirstPick(true); setPhase('draft'); }} className="w-full bg-blue-600 p-4 rounded-xl mb-4">藍方首選 (1-2-2-2-2-1)</button>
-          <button onClick={() => { setIsFirstPick(false); setPhase('draft'); }} className="w-full bg-red-600 p-4 rounded-xl">紅方後選 (1-2-2-2-2-1)</button>
+          <h1 className="text-2xl font-bold mb-8">BP 教練系統</h1>
+          <button onClick={() => setPhase('comp_select')} className="w-full bg-blue-600 p-4 rounded-xl mb-4">首選</button>
+          <button onClick={() => setPhase('comp_select')} className="w-full bg-red-600 p-4 rounded-xl">後選</button>
+        </div>
+      )}
+
+      {phase === 'comp_select' && (
+        <div>
+          <h2 className="text-center mb-4">選擇本次陣容體系</h2>
+          {/* 你可以在這裡放入你的陣容選擇按鈕，目前先用範例 */}
+          <button onClick={() => { setSelectedComp('消耗陣'); setPhase('draft'); }} className="w-full bg-slate-800 p-3 mb-2 rounded">消耗陣 (Poke)</button>
+          <button onClick={() => { setSelectedComp('進場陣'); setPhase('draft'); }} className="w-full bg-slate-800 p-3 rounded">進場陣 (Dive)</button>
         </div>
       )}
 
       {phase === 'draft' && currentTurn < 10 ? (
         <div>
-          <h2 className="text-center mb-4 text-yellow-400 font-bold">
-            {draftOrder[currentTurn] === 0 ? "輪到我方選擇" : "輪到敵方選擇"}
-          </h2>
+          <h2 className="text-center mb-2 font-bold text-yellow-400">目前陣容: {selectedComp}</h2>
           <div className="grid grid-cols-2 gap-3">
             {HERO_DB.filter(h => !ourPicks.find(p => p.id === h.id) && !enemyPicks.find(e => e.id === h.id)).map(h => {
-              let score = 0; let reason = "";
-              enemyPicks.forEach(e => { if (h.counters.includes(e.id)) { score += 150; reason = `完剋對手: ${e.name}`; } });
+              let score = 0; let reason = [];
+              enemyPicks.forEach(e => { if (h.counters.includes(e.id)) { score += 150; reason.push(`完剋: ${e.name}`); } });
               return (
                 <button key={h.id} onClick={() => handlePick(h)} className={`p-3 rounded-lg text-left ${score > 0 ? 'bg-amber-900 border border-amber-500' : 'bg-slate-800'}`}>
                   <div className="font-bold">{h.name}</div>
-                  {reason && <div className="text-[10px] text-amber-300">{reason}</div>}
+                  {reason.map(r => <div key={r} className="text-[10px] text-amber-300">{r}</div>)}
                 </button>
               );
             })}
           </div>
         </div>
       ) : phase === 'draft' && (
-        <div className="text-center pt-20">
-          <h2 className="text-xl font-bold text-green-400">BP 結束</h2>
-          <button onClick={() => window.location.reload()} className="mt-8 bg-blue-600 p-4 rounded-xl flex items-center justify-center gap-2 w-full"><RefreshCw /> 重新開始</button>
-        </div>
+        <button onClick={() => window.location.reload()} className="w-full bg-blue-600 p-4 mt-10 rounded">重新開始</button>
       )}
     </div>
   );
