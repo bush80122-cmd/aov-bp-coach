@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, AlertTriangle, ShieldAlert } from 'lucide-react';
 
 const HERO_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?output=csv";
 const TACTICS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?gid=1330847132&single=true&output=csv"; 
@@ -8,9 +8,12 @@ export default function App() {
   const [HERO_DB, setHERO_DB] = useState([]);
   const [TACTICS_DB, setTACTICS_DB] = useState([]);
   
+  // 核心狀態機: init -> initial_comp -> ban -> adjust_comp (optional) -> draft -> analysis
   const [phase, setPhase] = useState('init'); 
   const [isFirstPick, setIsFirstPick] = useState(true);
+  
   const [selectedComp, setSelectedComp] = useState(null);
+  const [adjustReason, setAdjustReason] = useState(""); // 轉陣原因提示
   
   const [bannedHeroes, setBannedHeroes] = useState([]);
   const [ourPicks, setOurPicks] = useState([]);
@@ -18,10 +21,10 @@ export default function App() {
   
   const BLUE_ORDER = [0, 1, 1, 0, 0, 1, 1, 0, 0, 1]; 
   const RED_ORDER  = [1, 0, 0, 1, 1, 0, 0, 1, 1, 0]; 
-  
   const currentTurn = ourPicks.length + enemyPicks.length;
   const draftOrder = isFirstPick ? BLUE_ORDER : RED_ORDER;
 
+  // CSV 解析
   const parseCSV = (text) => {
     if (!text) return [];
     const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
@@ -37,76 +40,313 @@ export default function App() {
   useEffect(() => {
     fetch(HERO_CSV_URL).then(res => res.text()).then(text => {
       setHERO_DB(parseCSV(text).map(obj => ({
-        id: obj.hero_id, name: obj.hero_name, roles: obj.primary_roles?.split(',') || ['其他'],
-        counters: obj.counters?.split(',') || [], trap: obj.is_trap === 'true'
+        id: obj.hero_id, name: obj.hero_name, roles: obj.primary_roles?.split(',').map(r=>r.trim()) || ['其他'],
+        counters: obj.counters?.split(',').map(c=>c.trim()) || [], trap: obj.is_trap?.toLowerCase() === 'true'
       })));
     });
     fetch(TACTICS_CSV_URL).then(res => res.text()).then(text => {
       setTACTICS_DB(parseCSV(text).map(obj => ({
-        ...obj, must_ban: obj.must_ban_heroes?.split(',') || [],
-        advantage: obj.advantage_vs?.split(',') || [], disadvantage: obj.disadvantage_vs?.split(',') || []
+        comp_id: obj.comp_id, comp_name: obj.comp_name, core_hero_id: obj.core_hero_id,
+        synergy_hero_ids: obj.synergy_hero_ids ? obj.synergy_hero_ids.split(',').map(c=>c.trim()) : [],
+        must_ban: obj.must_ban_heroes ? obj.must_ban_heroes.split(',').map(c=>c.trim()) : [],
+        advantage: obj.advantage || obj['優點'] || "", disadvantage: obj.disadvantage || obj['缺點'] || "",
+        advantage_vs: obj.advantage_vs ? obj.advantage_vs.split(',').map(c=>c.trim()) : [],
+        win_rate: obj.win_rate || obj['勝率'] || ""
       })));
     });
   }, []);
 
-  // 使用安全導航符號 ?. 來防止 selectedComp 為 null 時崩潰
+  // 敵方體系預測
+  const predictedEnemyComps = useMemo(() => {
+    if (enemyPicks.length === 0 || TACTICS_DB.length === 0) return [];
+    return TACTICS_DB.map(comp => {
+      let matchScore = 0; let matchReasons = [];
+      const hasCore = enemyPicks.find(e => e.id === comp.core_hero_id);
+      if (hasCore) { matchScore += 50; matchReasons.push(`核心:${hasCore.name}`); }
+      const pickedSynergies = enemyPicks.filter(e => comp.synergy_hero_ids.includes(e.id));
+      if (pickedSynergies.length > 0) { matchScore += (pickedSynergies.length * 20); matchReasons.push(`連動:${pickedSynergies.map(p => p.name).join(',')}`); }
+      return { ...comp, matchScore, matchReasons };
+    }).filter(comp => comp.matchScore > 0).sort((a, b) => b.matchScore - a.matchScore);
+  }, [enemyPicks, TACTICS_DB]);
+  const finalEnemyComp = predictedEnemyComps.length > 0 ? predictedEnemyComps[0] : null;
+
+  // 處理 Ban 結束後的邏輯：檢查是否需要被迫轉陣
+  const handleBanComplete = () => {
+    const isCoreBanned = bannedHeroes.some(b => b.id === selectedComp?.core_hero_id);
+    if (isCoreBanned) {
+      setAdjustReason(`核心英雄 [${HERO_DB.find(h=>h.id===selectedComp.core_hero_id)?.name}] 被禁用，請調整陣容！`);
+      setPhase('adjust_comp');
+    } else {
+      setPhase('draft');
+    }
+  };
+
+  // 英雄選取邏輯
   const handlePick = (hero) => {
-    if (draftOrder[currentTurn] === 0) setOurPicks([...ourPicks, hero]);
-    else setEnemyPicks([...enemyPicks, hero]);
-    if (currentTurn + 1 === 10) setPhase('analysis');
+    let newOurPicks = [...ourPicks];
+    let newEnemyPicks = [...enemyPicks];
+    
+    if (draftOrder[currentTurn] === 0) newOurPicks.push(hero);
+    else newEnemyPicks.push(hero);
+    
+    setOurPicks(newOurPicks);
+    setEnemyPicks(newEnemyPicks);
+    
+    const nextTurn = currentTurn + 1;
+    if (nextTurn === 10) {
+      setPhase('analysis');
+      return;
+    }
+
+    // 動態轉陣攔截器 (Pivot Interceptor)
+    // 1. 如果我們是後選，且對方剛選完第一隻 -> 依據對方首搶推薦轉陣
+    if (!isFirstPick && nextTurn === 1) {
+       setAdjustReason(`敵方首搶了 [${hero.name}]，建議依此調整我方針對陣容！`);
+       setPhase('adjust_comp');
+       return;
+    }
+    
+    // 2. 如果選角過程中，我們的核心被對面搶走了
+    if (draftOrder[currentTurn] === 1 && selectedComp && hero.id === selectedComp.core_hero_id) {
+       setAdjustReason(`糟糕！我方預定核心 [${hero.name}] 被敵方搶走，請立即轉陣！`);
+       setPhase('adjust_comp');
+       return;
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white font-sans p-4 max-w-md mx-auto">
+    <div className="min-h-screen bg-slate-900 text-white font-sans p-4 max-w-md mx-auto flex flex-col">
+      
+      {/* ================= 階段一：初始化 ================= */}
       {phase === 'init' && (
         <div className="text-center pt-20">
-          <h1 className="text-2xl font-bold mb-8">BP 教練系統</h1>
-          <button onClick={() => { setIsFirstPick(true); setPhase('ban'); }} className="w-full bg-blue-600 p-4 rounded-xl mb-4">首選</button>
-          <button onClick={() => { setIsFirstPick(false); setPhase('ban'); }} className="w-full bg-red-600 p-4 rounded-xl">後選</button>
+          <h1 className="text-2xl font-bold mb-8">傳說對決 BP 決策系統</h1>
+          <button onClick={() => { setIsFirstPick(true); setPhase('initial_comp'); }} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl mb-4 font-bold text-lg shadow-lg">首選 (藍方先亮牌)</button>
+          <button onClick={() => { setIsFirstPick(false); setPhase('initial_comp'); }} className="w-full bg-red-600 hover:bg-red-500 p-4 rounded-xl font-bold text-lg shadow-lg">後選 (紅方拿兩隻)</button>
         </div>
       )}
 
-      {phase === 'ban' && (
-        <div className="pt-10">
-          <h2 className="text-xl mb-4 text-center">禁用英雄 ({bannedHeroes.length}/6)</h2>
-          <div className="grid grid-cols-4 gap-2 mb-6">
-            {HERO_DB.map(h => (
-              <button key={h.id} onClick={() => {
-                if (bannedHeroes.find(b => b.id === h.id)) setBannedHeroes(bannedHeroes.filter(b => b.id !== h.id));
-                else if (bannedHeroes.length < 6) setBannedHeroes([...bannedHeroes, h]);
-              }} className={`p-2 rounded ${bannedHeroes.find(b => b.id === h.id) ? 'bg-red-700' : 'bg-slate-800'}`}>
-                {h.name}
+      {/* ================= 階段二：初始陣容選擇 ================= */}
+      {phase === 'initial_comp' && (
+        <div className="flex flex-col h-[calc(100vh-2rem)]">
+          <h2 className="text-center mb-6 font-bold text-xl text-yellow-400">Step 1: 選擇初始核心戰術</h2>
+          <div className="space-y-3 overflow-y-auto flex-1 pb-4">
+            {TACTICS_DB.map(comp => (
+              <button key={comp.comp_id} onClick={() => { setSelectedComp(comp); setPhase('ban'); }} className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-blue-500 text-left transition-all active:scale-98">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-bold text-lg">{comp.comp_name}</span>
+                  {comp.win_rate && <span className="text-xs font-mono bg-slate-900 text-green-400 px-2 py-1 rounded">勝率 {comp.win_rate}</span>}
+                </div>
+                {comp.must_ban.length > 0 && <div className="text-[10px] text-red-400 mt-2 flex items-center gap-1"><ShieldAlert size={12}/> 懼怕/必Ban: {comp.must_ban.map(id => HERO_DB.find(h=>h.id===id)?.name).join(', ')}</div>}
               </button>
             ))}
           </div>
-          <button onClick={() => isFirstPick ? setPhase('comp_select') : setPhase('draft')} className="w-full bg-blue-600 p-4 rounded-xl">下一步</button>
         </div>
       )}
 
-      {phase === 'comp_select' && (
-        <div className="pt-10">
-          <h2 className="text-xl mb-4 text-center">選擇陣容</h2>
-          {TACTICS_DB.map(comp => (
-            <button key={comp.comp_id} onClick={() => { setSelectedComp(comp); setPhase('draft'); }} className="block w-full p-4 mb-2 bg-slate-800 rounded text-left">
-              {comp.comp_name}
-              {selectedComp?.must_ban && <div className="text-xs text-red-400">需 BAN: {selectedComp.must_ban.join(',')}</div>}
-            </button>
-          ))}
+      {/* ================= 階段三：智慧 Ban 角 ================= */}
+      {phase === 'ban' && (
+        <div className="flex flex-col h-[calc(100vh-2rem)]">
+          <div className="text-center mb-4 shrink-0">
+            <h2 className="font-bold text-xl text-red-400 mb-1">Step 2: 禁用英雄 (Ban)</h2>
+            <p className="text-xs text-slate-400">請點選雙方禁用的 6 隻英雄 ({bannedHeroes.length}/6)</p>
+            <div className="mt-2 bg-slate-800/80 p-2 rounded-lg text-xs text-left border border-slate-700">
+               <span className="text-yellow-400 font-bold">🎯 我方陣容 [{selectedComp?.comp_name}]</span>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-2 overflow-y-auto flex-1 pb-4 pr-1">
+            {HERO_DB.map(h => {
+              const isBanned = bannedHeroes.find(b => b.id === h.id);
+              // Ban 角權重：1. 懼怕英雄 (最高) 2. 非我方體系但強勢的英雄
+              const isMustBan = selectedComp?.must_ban.includes(h.id);
+              const isOurSystem = h.id === selectedComp?.core_hero_id || selectedComp?.synergy_hero_ids.includes(h.id);
+              
+              let borderColor = 'border-slate-700';
+              let badge = null;
+              if (isMustBan) { borderColor = 'border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'; badge = '必Ban'; }
+              else if (!isOurSystem && !h.trap) { borderColor = 'border-amber-600/50'; }
+
+              return (
+                <button key={h.id} onClick={() => {
+                    if (isBanned) setBannedHeroes(bannedHeroes.filter(b => b.id !== h.id));
+                    else if (bannedHeroes.length < 6) setBannedHeroes([...bannedHeroes, h]);
+                  }} 
+                  className={`relative p-2 rounded-lg text-center transition-all border flex flex-col items-center justify-center min-h-[60px] ${
+                    isBanned ? 'bg-red-950/80 border-red-800 text-red-400 scale-95 opacity-50 grayscale' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  } ${borderColor}`}
+                >
+                  <span className="font-bold text-sm">{h.name}</span>
+                  {!isBanned && badge && <span className="absolute -top-2 -right-2 bg-red-600 text-white text-[9px] px-1.5 py-0.5 rounded-full">{badge}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <button onClick={handleBanComplete} className="w-full bg-red-600 hover:bg-red-500 p-4 rounded-xl font-bold text-lg shadow-lg shrink-0 mt-2">完成 Ban 角</button>
         </div>
       )}
 
-      {phase === 'draft' && (
-        <div className="pt-10 text-center">
-            <h2 className="text-xl">選角進行中...</h2>
-            {/* 這裡補上你的選角 UI 邏輯 */}
-            <button onClick={() => setPhase('analysis')} className="mt-10 bg-green-600 p-4 rounded-xl">測試結束</button>
+      {/* ================= 階段四：動態轉陣 (Adjust Comp) ================= */}
+      {phase === 'adjust_comp' && (
+        <div className="flex flex-col h-[calc(100vh-2rem)]">
+          <div className="text-center mb-4 shrink-0 bg-red-950/40 p-4 rounded-xl border border-red-500/30">
+            <AlertTriangle className="mx-auto text-red-400 mb-2" size={32} />
+            <h2 className="font-bold text-lg text-red-400 mb-1">戰術需重新評估</h2>
+            <p className="text-xs text-red-200">{adjustReason}</p>
+          </div>
+          
+          <h3 className="font-bold text-sm text-slate-300 mb-3">推薦備用/克制陣容：</h3>
+          <div className="space-y-3 overflow-y-auto flex-1 pb-4">
+            {TACTICS_DB
+              // 過濾掉核心已經被 Ban 或被選走的陣容
+              .filter(comp => !bannedHeroes.some(b=>b.id===comp.core_hero_id) && !enemyPicks.some(e=>e.id===comp.core_hero_id))
+              .map(comp => {
+                let score = 0;
+                let tags = [];
+                // 如果預測出敵方陣容，且該陣容有優勢
+                if (finalEnemyComp && comp.advantage_vs.includes(finalEnemyComp.comp_id)) {
+                  score += 100; tags.push('完剋敵方體系');
+                }
+                // 如果我們已經選了某些英雄，且符合這個新陣容
+                ourPicks.forEach(p => {
+                  if (comp.core_hero_id === p.id || comp.synergy_hero_ids.includes(p.id)) { score += 50; tags.push(`延續:${p.name}`); }
+                });
+                return { ...comp, score, tags };
+              })
+              .sort((a,b) => b.score - a.score)
+              .map(comp => (
+              <button key={comp.comp_id} onClick={() => { setSelectedComp(comp); setPhase('draft'); }} className={`w-full p-4 rounded-xl border text-left transition-all active:scale-98 ${comp.score > 0 ? 'bg-blue-950/40 border-blue-500/50' : 'bg-slate-800 border-slate-700'}`}>
+                <div className="flex justify-between items-center mb-1">
+                  <span className="font-bold text-lg">{comp.comp_name}</span>
+                  {comp.score > 0 && <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full">推薦轉移</span>}
+                </div>
+                <div className="flex gap-1 mt-2">
+                  {comp.tags.map((t, i) => <span key={i} className="text-[9px] bg-black/40 text-blue-300 border border-blue-500/30 px-1.5 py-0.5 rounded">{t}</span>)}
+                </div>
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setPhase('draft')} className="w-full bg-slate-700 p-3 rounded-xl font-bold text-sm mt-2">堅持原陣容 (不更改)</button>
         </div>
       )}
 
+      {/* ================= 階段五：Draft 選角 ================= */}
+      {phase === 'draft' && currentTurn < 10 && (
+        <div className="flex flex-col h-[calc(100vh-2rem)]">
+          
+          <div className="flex justify-between items-center mb-3 bg-slate-800/40 p-2 rounded-lg border border-slate-800 text-xs text-slate-400 shrink-0">
+             <div>當前體系: <span className="text-yellow-400 font-bold">{selectedComp ? selectedComp.comp_name : "尚未指定"}</span></div>
+             <div>進度: <span className="text-white font-mono">{currentTurn + 1}</span> / 10 手</div>
+          </div>
+          
+          <h2 className={`text-center mb-3 font-bold text-lg tracking-wide px-4 py-2 rounded-xl bg-slate-950/40 border shrink-0 ${draftOrder[currentTurn] === 0 ? "text-blue-400 border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.2)]" : "text-red-400 border-red-500/20"}`}>
+            {draftOrder[currentTurn] === 0 ? "🔵 輪到我方選擇" : "🔴 輪到敵方選擇"}
+          </h2>
+
+          {/* 雙方陣容展示區 */}
+          <div className="flex gap-2 mb-4 shrink-0 items-start">
+            <div className="flex-1 bg-blue-950/30 border border-blue-500/20 rounded-lg p-2 min-h-[70px]">
+              <h3 className="text-[11px] font-bold text-blue-400 mb-1.5 border-b border-blue-500/20 pb-1 flex justify-between"><span>我方陣容</span><span>{ourPicks.length}/5</span></h3>
+              <div className="flex flex-wrap gap-1.5">
+                {ourPicks.map(p => <span key={p.id} className="text-[11px] bg-blue-900/60 text-blue-100 px-1.5 py-0.5 rounded border border-blue-700/50">{p.name}</span>)}
+              </div>
+            </div>
+            
+            <div className="flex-1 bg-red-950/20 border border-red-500/10 rounded-lg p-2 min-h-[70px]">
+              <h3 className="text-[11px] font-bold text-red-400 mb-1.5 border-b border-red-500/10 pb-1 flex justify-between"><span>敵方陣容</span><span>{enemyPicks.length}/5</span></h3>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {enemyPicks.map(p => <span key={p.id} className="text-[11px] bg-red-900/50 text-red-100 px-1.5 py-0.5 rounded border border-red-800/50">{p.name}</span>)}
+              </div>
+              {predictedEnemyComps.length > 0 && (
+                <div className="pt-2 border-t border-red-900/50">
+                  <div className="text-[10px] text-red-400/80 mb-1 font-bold">⚠️ 體系預測：</div>
+                  {predictedEnemyComps.slice(0, 1).map((pComp, idx) => (
+                    <div key={idx} className="text-[10px] bg-black/40 text-red-200 px-1.5 py-1 rounded border border-red-900/50"><span className="font-bold text-red-300">{pComp.comp_name}</span></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 overflow-y-auto pr-1 flex-1 pb-4">
+            {HERO_DB
+              .filter(h => !ourPicks.find(p => p.id === h.id) && !enemyPicks.find(e => e.id === h.id) && !bannedHeroes.find(b => b.id === h.id))
+              .map(h => {
+                let score = 0; let reasons = [];
+                const currentTeamPicks = draftOrder[currentTurn] === 0 ? ourPicks : enemyPicks;
+                const filledRoles = currentTeamPicks.map(p => p.roles[0]);
+                
+                if (h.trap) { score -= 2000; }
+                const isRoleConflict = h.roles.every(r => filledRoles.includes(r));
+                if (isRoleConflict && currentTeamPicks.length > 0) { score -= 1000; reasons.push('路線重疊'); }
+                
+                // 動態推薦演算法：融合陣容連動與敵方反制
+                if (draftOrder[currentTurn] === 0) {
+                   if (selectedComp) {
+                     if (h.id === selectedComp.core_hero_id) { score += 1000; reasons.push('核心必選'); } 
+                     else if (selectedComp.synergy_hero_ids.includes(h.id)) { score += 500; reasons.push('陣容連動'); }
+                   }
+                   // 如果選到中後期，根據敵方預測陣容進行 Counter 加分
+                   if (finalEnemyComp && finalEnemyComp.must_ban.includes(h.id)) {
+                      score += 300; reasons.push('剋制敵方體系');
+                   }
+                }
+
+                enemyPicks.forEach(e => { if (h.counters && h.counters.includes(e.id)) { score += 100; reasons.push(`完剋: ${e.name}`); } });
+                return { ...h, score, reasons };
+              }).sort((a, b) => b.score - a.score)
+              .map(h => (
+                <button key={h.id} onClick={() => handlePick(h)} className={`p-3 rounded-xl text-left shadow transition-all duration-150 active:scale-95 border flex flex-col justify-between ${
+                  h.score >= 500 ? 'bg-blue-950/70 border-blue-500 text-blue-200' : 
+                  h.score > 0 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : 
+                  h.score < 0 ? 'bg-slate-900/40 border-slate-800/40 text-slate-600 opacity-50 grayscale' : 'bg-slate-800/80 border-slate-700/60'
+                }`}>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-bold text-base">{h.name}</span>
+                    <span className="text-[10px] opacity-40 bg-black/30 px-1.5 py-0.5 rounded">{h.roles[0]}</span>
+                  </div>
+                  <div className="min-h-[18px] flex flex-wrap gap-1 mt-auto">
+                    {h.reasons.length > 0 ? h.reasons.map((r, idx) => <span key={idx} className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${
+                      r.includes('路線重疊') ? 'bg-red-900/30 text-red-500 border-red-900/50' :
+                      r.includes('連動') || r.includes('核心') ? 'bg-blue-900/40 text-blue-300 border-blue-500/30' : 
+                      'bg-black/40 text-yellow-400 border-yellow-500/20'
+                    }`}>{r}</span>) : <span className="text-[9px] text-slate-500 italic">無特定戰術理由</span>}
+                  </div>
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* ================= 階段六：分析結算 ================= */}
       {phase === 'analysis' && (
-        <div className="pt-10 text-center">
-            <h2 className="text-2xl">BP 完成</h2>
-            <button onClick={() => window.location.reload()} className="mt-10 bg-blue-600 p-4 rounded-xl">重新開始</button>
+        <div className="text-center pt-4 pb-10">
+          <h2 className="text-2xl font-bold text-green-400 mb-6 tracking-wide">⚔️ BP 推演完成 ⚔️</h2>
+          
+          <div className="flex flex-col gap-4 mb-8 text-left">
+            <div className="bg-blue-950/30 border border-blue-500/20 p-4 rounded-xl shadow-inner">
+              <h3 className="font-bold text-blue-400 border-b border-blue-500/20 pb-2 mb-3 text-lg flex items-center justify-between">
+                <span>我方最終陣容</span>
+                {selectedComp && <span className="text-sm bg-blue-900/50 text-yellow-400 px-2 py-1 rounded border border-blue-700/50">{selectedComp.comp_name}</span>}
+              </h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {ourPicks.map((p, i) => <div key={i} className="text-sm bg-blue-900/30 px-3 py-1.5 rounded border border-blue-800/50"><span className="font-bold mr-2">{p.name}</span><span className="text-[10px] text-blue-400">{p.roles[0]}</span></div>)}
+              </div>
+            </div>
+            
+            <div className="bg-red-950/20 border border-red-500/10 p-4 rounded-xl shadow-inner">
+              <h3 className="font-bold text-red-400 border-b border-red-500/10 pb-2 mb-3 text-lg flex items-center justify-between">
+                <span>敵方最終陣容</span>
+                {finalEnemyComp ? <span className="text-sm bg-red-900/40 text-yellow-400 px-2 py-1 rounded border border-red-800/50">{finalEnemyComp.comp_name}</span> : <span className="text-sm bg-slate-800 text-slate-400 px-2 py-1 rounded border border-slate-700">未知體系</span>}
+              </h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {enemyPicks.map((p, i) => <div key={i} className="text-sm bg-red-900/20 px-3 py-1.5 rounded border border-red-900/30"><span className="font-bold mr-2">{p.name}</span><span className="text-[10px] text-red-400">{p.roles[0]}</span></div>)}
+              </div>
+            </div>
+          </div>
+          <button onClick={() => window.location.reload()} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2">
+            <RefreshCw size={20} /> 準備下一局推演
+          </button>
         </div>
       )}
     </div>
