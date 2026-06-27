@@ -3,7 +3,7 @@ import { RefreshCw } from 'lucide-react';
 
 // === 請在此處填入你從 Google Sheet 發布的兩個 CSV 連結 ===
 const HERO_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?output=csv";
-const TACTICS_CSV_URL = "請替換成你的_tactics分頁_CSV_連結"; 
+const TACTICS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?output=csv"; 
 
 export default function App() {
   const [HERO_DB, setHERO_DB] = useState([]);
