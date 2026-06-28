@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { RefreshCw, AlertTriangle, ShieldAlert, BookOpen } from 'lucide-react';
 
-// === 英雄表與戰術陣容表 CSV 連結 ===
 const HERO_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?output=csv";
 const TACTICS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT49yfhDIRZnOdWJOon74-hvLdd4OErtt6T0OH7laKE2DKWEe4gCPxyg-S450uEJs1k3gAOnlBN6EJM/pub?gid=1330847132&single=true&output=csv"; 
 
@@ -9,7 +8,6 @@ export default function App() {
   const [HERO_DB, setHERO_DB] = useState([]);
   const [TACTICS_DB, setTACTICS_DB] = useState([]);
   
-  // 核心狀態機
   const [phase, setPhase] = useState('init'); 
   const [isFirstPick, setIsFirstPick] = useState(true);
   const [gameMode, setGameMode] = useState('ranked'); // 'ranked' (6 Ban) 或 'tournament' (8 Ban 分段)
@@ -53,13 +51,16 @@ export default function App() {
       fetch(HERO_CSV_URL).then(res => res.text()).then(text => {
         const formattedData = parseCSV(text).map(obj => {
           const rolesArr = obj.primary_roles ? obj.primary_roles.split(',').map(r => r.trim()) : ['其他'];
+          // 支援多種萬金油/強勢角的欄位命名
+          const isMeta = obj.is_meta?.toLowerCase() === 'true' || obj['強勢角']?.toLowerCase() === 'true' || obj['萬金油']?.toLowerCase() === 'true';
           return {
             id: obj.hero_id,
             name: obj.hero_name,
             role: rolesArr[0], 
             roles: rolesArr,
             counters: obj.counters ? obj.counters.split(',').map(c => c.trim()) : [],
-            trap: obj.is_trap?.toLowerCase() === 'true'
+            trap: obj.is_trap?.toLowerCase() === 'true',
+            is_meta: isMeta
           };
         });
         setHERO_DB(formattedData);
@@ -105,12 +106,10 @@ export default function App() {
   const handleBanComplete = () => {
     const isCoreBanned = bannedHeroes.some(b => b.id === selectedComp?.core_hero_id);
     
-    // 如果核心被 Ban，最優先觸發轉陣
     if (isCoreBanned) {
       setAdjustReason(`核心英雄 [${HERO_DB.find(h=>h.id===selectedComp.core_hero_id)?.name}] 被禁用，請調整陣容！`);
       setPhase('adjust_comp');
     } 
-    // 冠軍賽模式：第二輪 Ban 角 (8隻) 結束後，強制觸發一次戰術檢驗
     else if (gameMode === 'tournament' && currentTurn === 6) {
       setAdjustReason(`第二階段 Ban 角結束！請參考最新 8 Ban 與雙方前 3 選狀態，決定最後 2 選是否轉陣！`);
       setPhase('adjust_comp');
@@ -137,7 +136,6 @@ export default function App() {
       return;
     }
 
-    // 冠軍賽模式：雙方各選完 3 隻 (共 6 隻) 後，自動進入第二階段 Ban 角
     if (gameMode === 'tournament' && nextTurn === 6) {
       setPhase('ban');
       return;
@@ -167,15 +165,17 @@ export default function App() {
     setOurPicks(newOur);
     setEnemyPicks(newEnemy);
 
-    // 防呆機制：如果移除英雄導致退回第一階段，連帶移除第二階段的 Ban 角
     const newTurn = newOur.length + newEnemy.length;
     if (gameMode === 'tournament' && newTurn < 6 && bannedHeroes.length > 4) {
       setBannedHeroes(bannedHeroes.slice(0, 4));
     }
   };
 
-  // 判斷目前 Ban 角階段的上限
-  const maxBans = gameMode === 'tournament' ? (currentTurn === 6 ? 8 : 4) : 6;
+  const maxBans = gameMode === 'tournament' ? (currentTurn >= 6 ? 8 : 4) : 6;
+
+  // 判定是否為第二階段 Ban (用來過濾已選路線)
+  const isPhase2Ban = gameMode === 'tournament' && currentTurn >= 6;
+  const enemyFilledRoles = enemyPicks.map(p => p.roles[0]);
 
   return (
     <div className="min-h-screen bg-slate-900 text-white font-sans p-4 max-w-md mx-auto flex flex-col selection:bg-blue-500/30">
@@ -236,7 +236,7 @@ export default function App() {
         <div className="flex flex-col h-[calc(100vh-2rem)]">
           <div className="text-center mb-4 shrink-0">
             <h2 className="font-bold text-xl text-red-400 tracking-wide mb-1">
-               {gameMode === 'tournament' ? (currentTurn === 6 ? "Step 3: 第二階段禁用 (Phase 2)" : "Step 2: 第一階段禁用 (Phase 1)") : "Step 2: 禁用英雄 (Ban)"}
+               {gameMode === 'tournament' ? (currentTurn >= 6 ? "Step 3: 第二階段禁用 (Phase 2)" : "Step 2: 第一階段禁用 (Phase 1)") : "Step 2: 禁用英雄 (Ban)"}
             </h2>
             <p className="text-xs text-slate-400">請點擊選擇雙方禁用的英雄 ({bannedHeroes.length} / {maxBans})</p>
             <div className="mt-2 bg-slate-800/80 p-2 rounded-lg text-xs text-left border border-slate-700 flex justify-between items-center">
@@ -247,9 +247,17 @@ export default function App() {
           <div className="grid grid-cols-3 gap-2 overflow-y-auto pr-1 flex-1 pb-4">
             {HERO_DB
               .sort((a, b) => {
+                // 邏輯1：若是第二階段 Ban，把敵方已經選過路線的英雄沉底
+                const aIsEnemyFilled = isPhase2Ban && a.roles.some(r => enemyFilledRoles.includes(r));
+                const bIsEnemyFilled = isPhase2Ban && b.roles.some(r => enemyFilledRoles.includes(r));
+                if (aIsEnemyFilled !== bIsEnemyFilled) return aIsEnemyFilled ? 1 : -1;
+
+                // 邏輯2：懼怕的英雄置頂
                 const aMust = selectedComp?.must_ban.includes(a.id) ? 1 : 0;
                 const bMust = selectedComp?.must_ban.includes(b.id) ? 1 : 0;
                 if (aMust !== bMust) return bMust - aMust;
+
+                // 邏輯3：非我方體系英雄往前擺
                 const aSys = (a.id === selectedComp?.core_hero_id || selectedComp?.synergy_hero_ids.includes(a.id)) ? 1 : 0;
                 const bSys = (b.id === selectedComp?.core_hero_id || selectedComp?.synergy_hero_ids.includes(b.id)) ? 1 : 0;
                 return aSys - bSys;
@@ -259,10 +267,22 @@ export default function App() {
                 const isMustBan = selectedComp?.must_ban.includes(h.id);
                 const isOurSystem = h.id === selectedComp?.core_hero_id || selectedComp?.synergy_hero_ids.includes(h.id);
                 
+                // 判斷敵方是否已經選了這個位置
+                const isEnemyFilled = isPhase2Ban && h.roles.some(r => enemyFilledRoles.includes(r));
+                
                 let borderColor = 'border-slate-700';
                 let badge = null;
-                if (isMustBan) { borderColor = 'border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'; badge = '極度懼怕'; }
-                else if (!isOurSystem && !h.trap) { borderColor = 'border-amber-600/50'; badge = '強勢建議'; }
+                let visualClass = '';
+
+                if (isEnemyFilled) {
+                  visualClass = 'opacity-30 grayscale'; // 敵方已選此路線，變暗提示不需Ban
+                } else if (isMustBan) { 
+                  borderColor = 'border-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'; 
+                  badge = '極度懼怕'; 
+                } else if (!isOurSystem && !h.trap) { 
+                  borderColor = 'border-amber-600/50'; 
+                  badge = '強勢建議'; 
+                }
 
                 return (
                   <button key={h.id} onClick={() => {
@@ -270,11 +290,11 @@ export default function App() {
                       else if (bannedHeroes.length < maxBans) setBannedHeroes([...bannedHeroes, h]);
                     }} 
                     className={`relative p-2 rounded-lg text-center transition-all border flex flex-col justify-center min-h-[60px] ${
-                      isBanned ? 'bg-red-950/80 border-red-500 text-red-400 scale-95 opacity-50 grayscale' : `bg-slate-800 text-slate-200 hover:bg-slate-700 ${borderColor}`
+                      isBanned ? 'bg-red-950/80 border-red-500 text-red-400 scale-95 opacity-20 grayscale' : `bg-slate-800 text-slate-200 hover:bg-slate-700 ${borderColor} ${visualClass}`
                     }`}
                   >
                     <span className="font-bold text-sm">{h.name}</span>
-                    {!isBanned && badge && <span className={`absolute -top-2 -right-2 text-[9px] px-1.5 py-0.5 rounded-full text-white ${isMustBan ? 'bg-red-600' : 'bg-amber-600'}`}>{badge}</span>}
+                    {!isBanned && badge && !isEnemyFilled && <span className={`absolute -top-2 -right-2 text-[9px] px-1.5 py-0.5 rounded-full text-white ${isMustBan ? 'bg-red-600' : 'bg-amber-600'}`}>{badge}</span>}
                   </button>
                 );
             })}
@@ -364,11 +384,7 @@ export default function App() {
               <div className="flex flex-wrap gap-1.5">
                 {ourPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
                   ourPicks.map(p => (
-                    <button 
-                      key={p.id} 
-                      onClick={() => removePick(p.id, true)} 
-                      className="text-[11px] bg-blue-900/60 text-blue-100 px-1.5 py-0.5 rounded border border-blue-700/50 hover:bg-red-900/80 hover:border-red-500 hover:text-red-200 transition-colors group flex items-center gap-1"
-                    >
+                    <button key={p.id} onClick={() => removePick(p.id, true)} className="text-[11px] bg-blue-900/60 text-blue-100 px-1.5 py-0.5 rounded border border-blue-700/50 hover:bg-red-900/80 hover:border-red-500 hover:text-red-200 transition-colors group flex items-center gap-1">
                       {p.name} <span className="opacity-0 group-hover:opacity-100 transition-opacity">✕</span>
                     </button>
                   ))
@@ -383,11 +399,7 @@ export default function App() {
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {enemyPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
                   enemyPicks.map(p => (
-                    <button 
-                      key={p.id} 
-                      onClick={() => removePick(p.id, false)} 
-                      className="text-[11px] bg-red-900/50 text-red-100 px-1.5 py-0.5 rounded border border-red-800/50 hover:bg-red-700 hover:border-red-400 transition-colors group flex items-center gap-1"
-                    >
+                    <button key={p.id} onClick={() => removePick(p.id, false)} className="text-[11px] bg-red-900/50 text-red-100 px-1.5 py-0.5 rounded border border-red-800/50 hover:bg-red-700 hover:border-red-400 transition-colors group flex items-center gap-1">
                       {p.name} <span className="opacity-0 group-hover:opacity-100 transition-opacity">✕</span>
                     </button>
                   ))
@@ -418,9 +430,16 @@ export default function App() {
                 if (h.trap) { score -= 2000; }
 
                 const isRoleConflict = h.roles.every(r => filledRoles.includes(r));
+                
                 if (isRoleConflict && currentTeamPicks.length > 0) {
                     score -= 1000;
                     reasons.push('路線重疊');
+                } else if (!isRoleConflict && draftOrder[currentTurn] === 0) {
+                    // ✅ 如果路線未重疊，判斷是否為萬金油/強勢角進行強力補位推薦
+                    if (h.is_meta) {
+                        score += 300;
+                        reasons.push('萬金油/強勢角');
+                    }
                 }
                 
                 if (draftOrder[currentTurn] === 0) {
@@ -439,7 +458,7 @@ export default function App() {
               .map(h => (
                 <button key={h.id} onClick={() => handlePick(h)} className={`p-3 rounded-xl text-left shadow transition-all duration-150 active:scale-95 border flex flex-col justify-between ${
                   h.score >= 500 ? 'bg-blue-950/70 border-blue-500 text-blue-200' : 
-                  h.score > 0 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : 
+                  h.score > 100 ? 'bg-amber-950/60 border-amber-600/80 text-amber-100' : 
                   h.score < 0 ? 'bg-slate-900/40 border-slate-800/40 text-slate-600 opacity-50 grayscale' : 
                   'bg-slate-800/80 border-slate-700/60'
                 }`}>
@@ -451,6 +470,7 @@ export default function App() {
                     {h.reasons.length > 0 ? h.reasons.map((r, idx) => <span key={idx} className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${
                       r.includes('路線重疊') ? 'bg-red-900/30 text-red-500 border-red-900/50' :
                       r.includes('連動') || r.includes('核心') ? 'bg-blue-900/40 text-blue-300 border-blue-500/30' : 
+                      r.includes('萬金油') ? 'bg-purple-900/50 text-purple-300 border-purple-500/40' :
                       'bg-black/40 text-yellow-400 border-yellow-500/20'
                     }`}>{r}</span>) : <span className="text-[9px] text-slate-500 italic">無特定戰術理由</span>}
                   </div>
@@ -497,24 +517,20 @@ export default function App() {
             </div>
           </div>
 
-          {/* 下半部：💡 教練賽前戰略分析面板 */}
           <div className="bg-slate-800/60 border border-yellow-500/30 p-4 rounded-xl text-left mb-8 shadow-lg">
             <h3 className="text-lg font-bold text-yellow-400 mb-4 flex items-center gap-2">
               <BookOpen size={20} /> 教練賽前戰略分析
             </h3>
 
-            {/* Part 1: 陣容優缺點分析 */}
             <div className="mb-5">
               <h4 className="text-sm font-bold text-slate-300 border-b border-slate-600 pb-1 mb-3">1. 雙方陣容優劣勢</h4>
               <div className="flex flex-col gap-3">
-                {/* 我方分析 */}
                 <div className="bg-blue-900/20 p-3 rounded-lg border border-blue-800/30 text-xs">
                   <span className="font-bold text-blue-400 block mb-1.5">【我方】{selectedComp ? selectedComp.comp_name : '未定'}</span>
                   {selectedComp?.advantage_comp ? <div className="text-green-300 mb-1"><span className="font-bold mr-1">✅ 優勢：</span>{selectedComp.advantage_comp}</div> : null}
                   {selectedComp?.disadvantage_comp ? <div className="text-red-300"><span className="font-bold mr-1">⚠️ 劣勢：</span>{selectedComp.disadvantage_comp}</div> : null}
                 </div>
                 
-                {/* 敵方分析 */}
                 <div className="bg-red-900/20 p-3 rounded-lg border border-red-800/30 text-xs">
                   <span className="font-bold text-red-400 block mb-1.5">【敵方】{finalEnemyComp ? finalEnemyComp.comp_name : '未知體系'}</span>
                   {finalEnemyComp?.advantage_comp ? <div className="text-green-300 mb-1"><span className="font-bold mr-1">✅ 優勢：</span>{finalEnemyComp.advantage_comp}</div> : null}
@@ -523,7 +539,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Part 2: 開局及營運重點 */}
             {selectedComp && (selectedComp.priority_lane || selectedComp.tactical_reason) && (
               <div>
                 <h4 className="text-sm font-bold text-slate-300 border-b border-slate-600 pb-1 mb-3">2. 開局與營運重點</h4>
