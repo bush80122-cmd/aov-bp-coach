@@ -9,9 +9,10 @@ export default function App() {
   const [HERO_DB, setHERO_DB] = useState([]);
   const [TACTICS_DB, setTACTICS_DB] = useState([]);
   
-  // 核心狀態機: init -> initial_comp -> ban -> adjust_comp (動態觸發) -> draft -> analysis
+  // 核心狀態機
   const [phase, setPhase] = useState('init'); 
   const [isFirstPick, setIsFirstPick] = useState(true);
+  const [gameMode, setGameMode] = useState('ranked'); // 'ranked' (6 Ban) 或 'tournament' (8 Ban 分段)
   
   const [selectedComp, setSelectedComp] = useState(null);
   const [adjustReason, setAdjustReason] = useState(""); 
@@ -103,10 +104,18 @@ export default function App() {
 
   const handleBanComplete = () => {
     const isCoreBanned = bannedHeroes.some(b => b.id === selectedComp?.core_hero_id);
+    
+    // 如果核心被 Ban，最優先觸發轉陣
     if (isCoreBanned) {
       setAdjustReason(`核心英雄 [${HERO_DB.find(h=>h.id===selectedComp.core_hero_id)?.name}] 被禁用，請調整陣容！`);
       setPhase('adjust_comp');
-    } else {
+    } 
+    // 冠軍賽模式：第二輪 Ban 角 (8隻) 結束後，強制觸發一次戰術檢驗
+    else if (gameMode === 'tournament' && currentTurn === 6) {
+      setAdjustReason(`第二階段 Ban 角結束！請參考最新 8 Ban 與雙方前 3 選狀態，決定最後 2 選是否轉陣！`);
+      setPhase('adjust_comp');
+    } 
+    else {
       setPhase('draft');
     }
   };
@@ -122,8 +131,15 @@ export default function App() {
     setEnemyPicks(newEnemyPicks);
     
     const nextTurn = currentTurn + 1;
+    
     if (nextTurn === 10) {
       setPhase('analysis');
+      return;
+    }
+
+    // 冠軍賽模式：雙方各選完 3 隻 (共 6 隻) 後，自動進入第二階段 Ban 角
+    if (gameMode === 'tournament' && nextTurn === 6) {
+      setPhase('ban');
       return;
     }
 
@@ -141,35 +157,62 @@ export default function App() {
     }
   };
 
-  // ✅ 新增的：點擊英雄取消選取功能
   const removePick = (heroId, isOurSide) => {
-    if (isOurSide) {
-      setOurPicks(ourPicks.filter(p => p.id !== heroId));
-    } else {
-      setEnemyPicks(enemyPicks.filter(p => p.id !== heroId));
+    let newOur = [...ourPicks];
+    let newEnemy = [...enemyPicks];
+    
+    if (isOurSide) newOur = newOur.filter(p => p.id !== heroId);
+    else newEnemy = newEnemy.filter(p => p.id !== heroId);
+    
+    setOurPicks(newOur);
+    setEnemyPicks(newEnemy);
+
+    // 防呆機制：如果移除英雄導致退回第一階段，連帶移除第二階段的 Ban 角
+    const newTurn = newOur.length + newEnemy.length;
+    if (gameMode === 'tournament' && newTurn < 6 && bannedHeroes.length > 4) {
+      setBannedHeroes(bannedHeroes.slice(0, 4));
     }
   };
+
+  // 判斷目前 Ban 角階段的上限
+  const maxBans = gameMode === 'tournament' ? (currentTurn === 6 ? 8 : 4) : 6;
 
   return (
     <div className="min-h-screen bg-slate-900 text-white font-sans p-4 max-w-md mx-auto flex flex-col selection:bg-blue-500/30">
       
-      {/* ================= 階段一：初始化 ================= */}
+      {/* ================= 階段一：初始化與模式選擇 ================= */}
       {phase === 'init' && (
-        <div className="text-center pt-20">
+        <div className="text-center pt-10">
           <h1 className="text-2xl font-bold mb-8 tracking-wider">傳說對決 BP 決策系統</h1>
-          <button onClick={() => { setIsFirstPick(true); setPhase('initial_comp'); }} className="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 transition-all p-4 rounded-xl mb-4 font-bold text-lg shadow-lg">
-            首選 (藍方先亮牌)
-          </button>
-          <button onClick={() => { setIsFirstPick(false); setPhase('initial_comp'); }} className="w-full bg-red-600 hover:bg-red-500 active:scale-95 transition-all p-4 rounded-xl font-bold text-lg shadow-lg">
-            後選 (紅方拿兩隻)
-          </button>
+          
+          <div className="bg-slate-800/80 p-5 rounded-2xl mb-6 border border-slate-700 shadow-lg">
+            <h2 className="text-lg font-bold text-blue-400 mb-4 border-b border-slate-600 pb-2">排位賽模式 (6 Ban)</h2>
+            <div className="flex gap-4">
+              <button onClick={() => { setGameMode('ranked'); setIsFirstPick(true); setPhase('initial_comp'); }} className="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-95 p-4 rounded-xl font-bold transition-all">藍方首選</button>
+              <button onClick={() => { setGameMode('ranked'); setIsFirstPick(false); setPhase('initial_comp'); }} className="flex-1 bg-red-600 hover:bg-red-500 active:scale-95 p-4 rounded-xl font-bold transition-all">紅方後選</button>
+            </div>
+          </div>
+
+          <div className="bg-slate-800/80 p-5 rounded-2xl border border-slate-700 shadow-lg relative overflow-hidden">
+            <div className="absolute top-0 right-0 bg-yellow-500 text-slate-900 text-[10px] font-bold px-2 py-1 rounded-bl-lg">進階</div>
+            <h2 className="text-lg font-bold text-yellow-400 mb-4 border-b border-slate-600 pb-2">冠軍賽模式 (8 Ban 分段)</h2>
+            <div className="flex gap-4">
+              <button onClick={() => { setGameMode('tournament'); setIsFirstPick(true); setPhase('initial_comp'); }} className="flex-1 bg-blue-600 hover:bg-blue-500 active:scale-95 p-4 rounded-xl font-bold transition-all">藍方首選</button>
+              <button onClick={() => { setGameMode('tournament'); setIsFirstPick(false); setPhase('initial_comp'); }} className="flex-1 bg-red-600 hover:bg-red-500 active:scale-95 p-4 rounded-xl font-bold transition-all">紅方後選</button>
+            </div>
+          </div>
         </div>
       )}
 
       {/* ================= 階段二：初始陣容選擇 ================= */}
       {phase === 'initial_comp' && (
         <div className="flex flex-col h-[calc(100vh-2rem)]">
-          <h2 className="text-center mb-6 font-bold text-xl text-yellow-400 tracking-wide">Step 1: 選擇初始戰術體系</h2>
+          <div className="text-center mb-6 shrink-0">
+             <div className="inline-block bg-slate-800 text-slate-300 text-xs px-3 py-1 rounded-full mb-3 border border-slate-600">
+               {gameMode === 'tournament' ? '🏆 冠軍賽模式' : '⚔️ 排位賽模式'}
+             </div>
+             <h2 className="font-bold text-xl text-yellow-400 tracking-wide">Step 1: 選擇初始戰術體系</h2>
+          </div>
           <div className="space-y-3 overflow-y-auto flex-1 pb-4">
             {TACTICS_DB.map(comp => (
               <button key={comp.comp_id} onClick={() => { setSelectedComp(comp); setPhase('ban'); }} className="w-full bg-slate-800 p-4 rounded-xl border border-slate-700 hover:border-blue-500 text-left transition-all active:scale-98">
@@ -192,8 +235,10 @@ export default function App() {
       {phase === 'ban' && (
         <div className="flex flex-col h-[calc(100vh-2rem)]">
           <div className="text-center mb-4 shrink-0">
-            <h2 className="font-bold text-xl text-red-400 tracking-wide mb-1">Step 2: 禁用英雄 (Ban)</h2>
-            <p className="text-xs text-slate-400">請點擊選擇雙方禁用的英雄 ({bannedHeroes.length}/6)</p>
+            <h2 className="font-bold text-xl text-red-400 tracking-wide mb-1">
+               {gameMode === 'tournament' ? (currentTurn === 6 ? "Step 3: 第二階段禁用 (Phase 2)" : "Step 2: 第一階段禁用 (Phase 1)") : "Step 2: 禁用英雄 (Ban)"}
+            </h2>
+            <p className="text-xs text-slate-400">請點擊選擇雙方禁用的英雄 ({bannedHeroes.length} / {maxBans})</p>
             <div className="mt-2 bg-slate-800/80 p-2 rounded-lg text-xs text-left border border-slate-700 flex justify-between items-center">
                <span><span className="text-yellow-400 font-bold">🎯 我方陣容：</span>{selectedComp?.comp_name}</span>
             </div>
@@ -222,7 +267,7 @@ export default function App() {
                 return (
                   <button key={h.id} onClick={() => {
                       if (isBanned) setBannedHeroes(bannedHeroes.filter(b => b.id !== h.id));
-                      else if (bannedHeroes.length < 6) setBannedHeroes([...bannedHeroes, h]);
+                      else if (bannedHeroes.length < maxBans) setBannedHeroes([...bannedHeroes, h]);
                     }} 
                     className={`relative p-2 rounded-lg text-center transition-all border flex flex-col justify-center min-h-[60px] ${
                       isBanned ? 'bg-red-950/80 border-red-500 text-red-400 scale-95 opacity-50 grayscale' : `bg-slate-800 text-slate-200 hover:bg-slate-700 ${borderColor}`
@@ -317,7 +362,6 @@ export default function App() {
                 <span>我方陣容</span><span>{ourPicks.length}/5</span>
               </h3>
               <div className="flex flex-wrap gap-1.5">
-                {/* ✅ 新增：可點擊移除的按鈕 */}
                 {ourPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
                   ourPicks.map(p => (
                     <button 
@@ -337,7 +381,6 @@ export default function App() {
                 <span>敵方陣容</span><span>{enemyPicks.length}/5</span>
               </h3>
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {/* ✅ 新增：可點擊移除的按鈕 */}
                 {enemyPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
                   enemyPicks.map(p => (
                     <button 
@@ -502,7 +545,6 @@ export default function App() {
             )}
           </div>
 
-          {/* ✅ 更新的：使用 resetApp 取代 window.location.reload() 避免黑屏 */}
           <button onClick={resetApp} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all mt-auto shrink-0">
             <RefreshCw size={20} /> 準備下一局推演
           </button>
