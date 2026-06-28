@@ -26,6 +26,15 @@ export default function App() {
   const currentTurn = ourPicks.length + enemyPicks.length;
   const draftOrder = isFirstPick ? BLUE_ORDER : RED_ORDER;
 
+  const resetApp = () => {
+    setPhase('init');
+    setOurPicks([]);
+    setEnemyPicks([]);
+    setBannedHeroes([]);
+    setSelectedComp(null);
+    setAdjustReason("");
+  };
+
   const parseCSV = (text) => {
     if (!text) return [];
     const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
@@ -67,7 +76,6 @@ export default function App() {
           advantage_vs: obj.advantage_vs ? obj.advantage_vs.split(',').map(c => c.trim()) : [], 
           disadvantage_vs: obj.disadvantage_vs ? obj.disadvantage_vs.split(',').map(c => c.trim()) : [], 
           win_rate: obj.win_rate || obj['勝率'] || "",
-          // 更新：對齊表單新的欄位名稱
           advantage_comp: obj.advantage_comp || "",
           disadvantage_comp: obj.disadvantage_comp || "",
           priority_lane: obj.priority_lane || "",
@@ -130,6 +138,15 @@ export default function App() {
          setPhase('adjust_comp');
          return;
       }
+    }
+  };
+
+  // ✅ 新增的：點擊英雄取消選取功能
+  const removePick = (heroId, isOurSide) => {
+    if (isOurSide) {
+      setOurPicks(ourPicks.filter(p => p.id !== heroId));
+    } else {
+      setEnemyPicks(enemyPicks.filter(p => p.id !== heroId));
     }
   };
 
@@ -300,8 +317,17 @@ export default function App() {
                 <span>我方陣容</span><span>{ourPicks.length}/5</span>
               </h3>
               <div className="flex flex-wrap gap-1.5">
+                {/* ✅ 新增：可點擊移除的按鈕 */}
                 {ourPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
-                  ourPicks.map(p => <span key={p.id} className="text-[11px] bg-blue-900/60 text-blue-100 px-1.5 py-0.5 rounded border border-blue-700/50">{p.name}</span>)
+                  ourPicks.map(p => (
+                    <button 
+                      key={p.id} 
+                      onClick={() => removePick(p.id, true)} 
+                      className="text-[11px] bg-blue-900/60 text-blue-100 px-1.5 py-0.5 rounded border border-blue-700/50 hover:bg-red-900/80 hover:border-red-500 hover:text-red-200 transition-colors group flex items-center gap-1"
+                    >
+                      {p.name} <span className="opacity-0 group-hover:opacity-100 transition-opacity">✕</span>
+                    </button>
+                  ))
                 }
               </div>
             </div>
@@ -311,8 +337,17 @@ export default function App() {
                 <span>敵方陣容</span><span>{enemyPicks.length}/5</span>
               </h3>
               <div className="flex flex-wrap gap-1.5 mb-2">
+                {/* ✅ 新增：可點擊移除的按鈕 */}
                 {enemyPicks.length === 0 ? <span className="text-[10px] text-slate-500">尚無選擇</span> : 
-                  enemyPicks.map(p => <span key={p.id} className="text-[11px] bg-red-900/50 text-red-100 px-1.5 py-0.5 rounded border border-red-800/50">{p.name}</span>)
+                  enemyPicks.map(p => (
+                    <button 
+                      key={p.id} 
+                      onClick={() => removePick(p.id, false)} 
+                      className="text-[11px] bg-red-900/50 text-red-100 px-1.5 py-0.5 rounded border border-red-800/50 hover:bg-red-700 hover:border-red-400 transition-colors group flex items-center gap-1"
+                    >
+                      {p.name} <span className="opacity-0 group-hover:opacity-100 transition-opacity">✕</span>
+                    </button>
+                  ))
                 }
               </div>
               
@@ -467,7 +502,8 @@ export default function App() {
             )}
           </div>
 
-          <button onClick={() => window.location.reload()} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all mt-auto shrink-0">
+          {/* ✅ 更新的：使用 resetApp 取代 window.location.reload() 避免黑屏 */}
+          <button onClick={resetApp} className="w-full bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all mt-auto shrink-0">
             <RefreshCw size={20} /> 準備下一局推演
           </button>
         </div>
